@@ -1,0 +1,6 @@
+{
+  "name": "tuljai-petroleum-browser-tests",
+  "private": true,
+  "scripts": { "test": "node --test tests/owner-controls.test.cjs" },
+  "devDependencies": { "playwright": "1.65.1" }
+}

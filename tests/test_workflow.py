@@ -527,6 +527,36 @@ class HostedTest(unittest.TestCase):
         self.assertIn("; Secure", restarted.set_cookies["owner"])
         self.assertEqual(restarted.request("/api/owner/dashboard")[0], 401)
 
+    def test_hosted_owner_business_controls_persist(self):
+        database = TursoDatabase.from_env(self.env, required=True)
+        setup_owner(database, self.env, "9000000001", "TestOw7")
+        browser = Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
+        def request(path, data=None):
+            status, body = browser.request(path, data)
+            self.assertEqual(status, 200, body)
+            return body
+        request("/api/owner/login", {"identifier":"9000000001", "password":"TestOw7"})
+        request("/api/owner/managers", {"name":"Hosted Manager", "phone":"9000000002", "password":"TestMg7"})
+        request("/api/owner/settings", {"rates":{"Petrol":"100", "Diesel":"90"}})
+        request("/api/owner/tanks", {"fuel":"Petrol", "capacity":"10000", "low_level":"1000"})
+        request("/api/manager/login", {"identifier":"9000000002", "password":"TestMg7"})
+        shift = request("/api/manager/shift", {"openings":{"1":0,"2":0}})
+        request(f"/api/manager/shifts/{shift['id']}/submit", {
+            "closings":{"1":1,"2":0}, "collections":{"upi":50}, "counted":0,
+            "entries":{"payments":[{"method":"credit","amount":50,"party":"Hosted Fleet"}]},
+        })
+        request("/api/owner/repayments", {"customer_key":"hosted fleet", "amount":10, "method":"bank", "paid_on":"2026-11-22", "reference":"HOSTED-R"})
+        request("/api/owner/bank-records", {"source":f"shift:{shift['id']}", "method":"upi", "amount":49, "fees":1, "bank_date":"2026-11-22", "reference":"HOSTED-B"})
+        request(f"/api/owner/shifts/{shift['id']}/corrections", {"reason":"Confirm reference"})
+        restarted = Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
+        restarted.cookies = browser.cookies.copy()
+        status, state = restarted.request("/api/owner/business")
+        self.assertEqual(status, 200, state)
+        self.assertEqual(state["customers"][0]["balance"], 4000)
+        self.assertEqual(state["settlements"][0]["remaining"], 0)
+        self.assertEqual(state["tanks"]["Petrol"]["capacity"], 10000000)
+        self.assertEqual(state["corrections"][0]["reason"], "Confirm reference")
+
     def test_reset_owner_preserves_account_and_revokes_sessions(self):
         env = self.env
         database = TursoDatabase.from_env(env, required=True)

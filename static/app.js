@@ -119,8 +119,8 @@ function showLogin(message = "") {
 
 function shell(content, view = "home") {
   const navigation = role === "owner"
-    ? [["home", "Overview"], ["daily-report", "Daily report"], ["settings", "Settings"], ["team", "Team"]]
-    : [["home", "Shift operations"]];
+    ? [["home", "Overview"], ["daily-report", "Daily report"], ["money", "Money"], ["operations", "Operations"], ["exceptions", "Exceptions"], ["settings", "Settings"], ["team", "Team"]]
+    : [["home", "Shift operations"], ["requests", "Owner requests"]];
   const shouldFocus = document.activeElement && document.activeElement !== document.body;
   root.innerHTML = `<a class="skip-link" href="#main-content">Skip to main content</a>
     <header class="workspace-header">
@@ -146,13 +146,13 @@ function shell(content, view = "home") {
     showLogin();
     document.querySelector("#login").elements.identifier.focus();
   });
-  listen("home", role === "owner" ? showHome : () => {
-    root.querySelector("main h1")?.focus();
-  });
+  listen("home", showHome);
+  if (role === "manager") listen("requests", openManagerRequests);
   if (role === "owner") {
     listen("settings", openSettings);
     listen("daily-report", openDailyReport);
     listen("team", openTeam);
+    for (const view of ["money", "operations", "exceptions"]) listen(view, () => openBusiness(view));
   }
 }
 
@@ -230,7 +230,7 @@ async function showHome() {
     "/dashboard" + (selectedDate ? "?date=" + encodeURIComponent(selectedDate) : ""));
   session = state.session;
   if (role === "manager") showManager(state);
-  else showOwner(state);
+  else await showOwner(state);
 }
 
 function showManager(state) {
@@ -275,10 +275,11 @@ function showManager(state) {
   });
 }
 
-function showClosing(active) {
-  shell(`${heading("Shift #" + active.id + " · " + businessDay(active.business_date), "Close shift",
+function showClosing(active, original = null) {
+  shell(`${heading("Shift #" + active.id + " · " + businessDay(active.business_date), original ? "Correct submitted shift" : "Close shift",
     "Enter the closing readings and reconcile the till before submitting.")}
     <form id="close-shift">
+      ${original ? '<label class="card">Reason for correcting this report<textarea name="correction_reason" required maxlength="500"></textarea><small>The original report is retained. Later shifts, bank reconciliation records or customer repayments can prevent a correction.</small></label>' : ""}
       <div class="work-grid">
         <div class="stack">
           <section class="card">
@@ -327,24 +328,35 @@ function showClosing(active) {
             <div><dt>Actual cash counted</dt><dd id="counted">—</dd></div>
           </dl>
           <div class="result"><div><strong>Cash difference</strong><small>Actual counted − expected cash</small></div><output id="variance">—</output></div>
-          ${errorbox}<button class="primary">Submit shift closing</button>
-          <p class="quiet submit-help">Submission locks the shift report and makes it available to the owner.</p>
+          ${errorbox}<button class="primary">${original ? "Save report correction" : "Submit shift closing"}</button>
+          ${original ? '<button type="button" id="cancel-correction" class="secondary">Cancel correction</button>' : ""}
+          <p class="quiet submit-help">${original ? "The original report is retained and the corrected report will need review again." : "Submission locks the shift report and makes it available to the owner."}</p>
         </aside>
       </div>
     </form>`);
   const form = bindForm("close-shift", async form => {
     const values = fields(form);
     const byFuel = prefix => Object.fromEntries(fuelNames.map(fuel => [fuel, values[prefix + fuel]]));
-    lastSubmission = await api("/shifts/" + active.id + "/submit", {
+    lastSubmission = await api("/shifts/" + active.id + (original ? "/revise" : "/submit"), {
+      correction_reason: values.correction_reason, expected_version: original?.version,
       closings: Object.fromEntries(active.nozzles.map(nozzle => [nozzle.id, values["closing_" + nozzle.id]])),
       deliveries: byFuel("delivery_"), physical: byFuel("physical_"),
       collections: Object.fromEntries(Object.keys(methodNames).map(key => [key, values[key]])),
       expenses: values.expenses, counted: values.counted, expense_note: values.expense_note,
       entries: collectEntries(form), shift_note: values.shift_note,
     });
+    if (original) {
+      showReport(lastSubmission);
+      showBusinessNotice("Correction saved. Original report retained.");
+      return;
+    }
     await showHome();
   });
   bindManagerEntries(form, active);
+  if (original) {
+    listen("cancel-correction", () => showReport(original));
+    fillCorrectionForm(form, original);
+  }
   updatePreview(form, active);
 }
 
@@ -410,7 +422,7 @@ function bindDateFilter(endpoint, render) {
     try {
       const updated = await api(endpoint + "?date=" + encodeURIComponent(date));
       if (!control.isConnected || control.value !== date) return;
-      render(updated);
+      await render(updated, () => control.isConnected && control.value === date);
       document.querySelector("#date").focus({ preventScroll: true });
     } catch (error) {
       if (!control.isConnected || control.value !== date) return;
@@ -422,7 +434,9 @@ function bindDateFilter(endpoint, render) {
   }, "change");
 }
 
-function showOwner(data) {
+async function showOwner(data, canRender = () => true) {
+  const business = await api("/business");
+  if (!canRender()) return;
   selectedDate = data.date;
   const totalSales = fuelNames.reduce((total, fuel) => total + data.daily[fuel].sales, 0);
   const totalVolume = fuelNames.reduce((total, fuel) => total + data.daily[fuel].litres, 0);
@@ -436,6 +450,7 @@ function showOwner(data) {
   ${missingRates ? `<div class="setup-notice"><span class="setup-icon">${icon("warning")}</span>
     <div><strong>Complete your station setup</strong><p>Set selling rates for Petrol and Diesel to enable the first shift.</p></div>
     <button id="setup-rates" class="secondary" type="button">Set fuel rates ${icon("arrow")}</button></div>` : ""}
+  ${businessOverview(business)}
   <div class="owner-layout">
     <section class="sales-surface" aria-label="Daily fuel sales">
       <div class="sales-head"><span>Fuel sales</span><span>${data.shifts.length} submitted shifts</span></div>
@@ -464,6 +479,7 @@ function showOwner(data) {
         return `<details class="stock-detail">
           <summary><span>${fuelTag(fuel)}<small>Calculated stock</small></span>
             <strong class="${item.calculated < 0 ? "discrepancy" : ""}">${volume(item.calculated)}</strong></summary>
+          ${configuredTankStatus(fuel, item, business.tanks[fuel])}
           <dl class="key-values">
             <div><dt>Opening stock</dt><dd>${volume(item.opening)}</dd></div>
             <div><dt>Delivered</dt><dd>${volume(item.delivery)}</dd></div>
@@ -491,6 +507,7 @@ function showOwner(data) {
         </tr>`).join("")}</tbody>
       </table></div>` : '<p class="ledger-empty">No shifts submitted for this business date.</p>'}
   </section></div>`);
+  bindBusinessOverview();
   if (missingRates) listen("setup-rates", openSettings);
   bindDateFilter("/dashboard", showOwner);
   listen("open-daily-report", openDailyReport);
@@ -537,6 +554,7 @@ function showReport(shift, source = "home") {
         }).join("")}</div>
       </section>
       ${recordedEntries(shift.entries, shift.shift_note)}
+      ${correctionPanel(shift)}
       <section class="card"><h2>Owner review</h2>
         ${shift.review ? `<p><span class="status reviewed">Reviewed</span> ${safe(shift.review.reviewer)} · ${timestamp(shift.review.reviewed_at)}</p>
           ${shift.review.review_note ? `<p class="review-note">${safe(shift.review.review_note)}</p>` : ""}`
@@ -549,6 +567,7 @@ function showReport(shift, source = "home") {
         <dd class="${discrepancy && value ? "discrepancy" : ""}">${money(value)}</dd></div>`).join("")}</dl>
       ${shift.expense_note ? `<p class="review-note"><strong>Expense note</strong> ${safe(shift.expense_note)}</p>` : ""}
     </aside></div>`, source);
+  bindCorrectionPanel(shift, source);
   listen("back", source === "daily-report" ? openDailyReport : showHome);
   if (!shift.review) {
     bindForm("review", async form => showReport(await api("/shifts/" + shift.id + "/review", fields(form)), source));
@@ -564,8 +583,7 @@ function showTeam(managers, added = false) {
     ${added ? '<p class="success" role="status">Manager account created. Share the sign-in details privately.</p>' : ""}
     <section class="card">
       <h2>Station managers</h2>
-      ${managers.length ? `<dl class="key-values">${managers.map(manager =>
-        `<div><dt>${safe(manager.name)}</dt><dd>${safe(manager.login_id)}</dd></div>`).join("")}</dl>`
+      ${managers.length ? managers.map(manager => managerControls(manager)).join("")
         : '<p>No manager accounts yet.</p>'}
     </section>
     <section class="card">
@@ -581,9 +599,10 @@ function showTeam(managers, added = false) {
         ${errorbox}<button class="primary">Create manager account</button>
       </form>
     </section>`, "team");
+  bindManagerControls(managers);
   bindForm("add-manager", async form => {
-    const manager = await api("/managers", fields(form));
-    showTeam([...managers, manager], true);
+    await api("/managers", fields(form));
+    showTeam(await api("/managers"), true);
   });
 }
 

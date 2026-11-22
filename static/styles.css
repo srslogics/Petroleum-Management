@@ -366,3 +366,21 @@ input, select, textarea { scroll-margin-block: 1rem; }
 .day-entry-group { margin-top: 1rem; }
 .day-entry-group > h3 { font-size: .95rem; }
 .day-entry-group .card { margin-top: .6rem; box-shadow: none; }
+
+/* Owner business controls */
+.owner-control-summary { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+.owner-control-summary > small { flex-basis: 100%; }
+.business-form { display: grid; gap: .9rem; padding: 1rem 0; max-width: 42rem; }
+.business-form > button { justify-self: start; }
+.business-record { border-top: 1px solid var(--line); padding: 1rem 0; }
+.business-record > summary { cursor: pointer; font-weight: 650; padding: .4rem 0; overflow-wrap: anywhere; }
+.business-record small { display: block; margin-top: .3rem; }
+.business-record p { margin: .5rem 0; }
+.app-nav { overflow-x: auto; }
+.business-record[hidden] { display: none; }
+.table-scroll { position: relative; }
+@media (max-width: 650px) {
+  .app-nav { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); }
+  .header-station { order: 3; flex: 1 0 100%; padding-left: 0; border-left: 0; }
+  .header-station strong { overflow-wrap: normal; }
+}
