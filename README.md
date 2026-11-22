@@ -19,9 +19,37 @@ Each app has a **Fill demo sign-in** button. Keep both apps open in separate tab
 
 ## Deploy on Render
 
-1. In the [Render Dashboard](https://dashboard.render.com/), choose **New → Blueprint**, connect `srslogics/Petroleum-Management`, and select `main`. The repository's `render.yaml` configures one Python web service in Singapore with Gunicorn, a health check at `/healthz`, and a 1 GB persistent disk at `/var/data`. The Starter service and disk are paid resources.
-2. When prompted, set `PETROLEUM_OWNER_EMAIL`, `PETROLEUM_OWNER_PASSWORD`, `PETROLEUM_MANAGER_EMAIL`, and `PETROLEUM_MANAGER_PASSWORD`. Use distinct emails and strong, unique passwords of at least 16 characters. To use your own station label, set `PETROLEUM_STATION_NAME` and `PETROLEUM_STATION_CODE` in the service environment before the first start.
-3. Once the service is live, open `/owner` on its HTTPS URL. In **Settings**, enter the station's opening stock and current Petrol and Diesel rates, and confirm the nozzle list. The service starts with one nozzle per fuel (`P-01` and `D-01`), and **Add nozzle** lets you record additional meters. Open `/manager` to enter the first shift's meter readings.
+In the [Render Dashboard](https://dashboard.render.com/), select **New → Web Service**. Connect `srslogics/Petroleum-Management` through your GitHub account.
+
+| Field | Value |
+| --- | --- |
+| Name | `petroleum-management` |
+| Branch | `main` |
+| Root Directory | Leave blank |
+| Runtime | Python 3 |
+| Region | Singapore |
+| Instance Type | Starter |
+| Build Command | `python -m pip install -r requirements.txt && python -m unittest discover -s tests -v` |
+| Start Command | `gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --preload 'app:create_app()'` |
+
+Before selecting **Create Web Service**, open **Advanced**. Set the Health Check Path to `/healthz` and add a **1 GB persistent disk** mounted at `/var/data`. The Starter service and disk are paid resources.
+
+Add these environment variables in the service creation form.
+
+| Environment variable | Value |
+| --- | --- |
+| `PETROLEUM_HOSTED` | `1` |
+| `PETROLEUM_DB` | `/var/data/petroleum.sqlite3` |
+| `PETROLEUM_OWNER_EMAIL` | Your owner sign-in email |
+| `PETROLEUM_OWNER_PASSWORD` | A unique password of at least 16 characters |
+| `PETROLEUM_MANAGER_EMAIL` | A different email for the station manager |
+| `PETROLEUM_MANAGER_PASSWORD` | A different unique password of at least 16 characters |
+
+To use your own station label, optionally set `PETROLEUM_STATION_NAME` and `PETROLEUM_STATION_CODE` before the first start. Then select **Create Web Service**.
+
+Once the service is live, open `/owner` on its HTTPS URL. In **Settings**, enter the station's opening stock and current Petrol and Diesel rates, and confirm the nozzle list. The service starts with one nozzle per fuel (`P-01` and `D-01`), and **Add nozzle** lets you record additional meters. Open `/manager` to enter the first shift's meter readings.
+
+If your dashboard offers **New → Blueprint**, you can instead import `render.yaml` from `main` and supply the two accounts when prompted.
 
 The hosted database is created on first start at `/var/data/petroleum.sqlite3`. It starts with zero opening stock, unset selling rates and the two accounts you supplied. Account credentials and station labels are read when creating a new database. Changing those environment variables later does not update existing accounts or station labels.
 
