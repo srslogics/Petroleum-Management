@@ -92,3 +92,9 @@ python3 -m unittest discover -s tests -v
 ```
 
 The tests call the WSGI application directly with temporary databases. Hosted-path tests exercise the Turso HTTP protocol against a local SQLite fixture. They do not require a Turso Cloud connection. They cover two consecutive shifts, carry-forward, rate history, duplicate protection, daily totals, stock, reviews, role and station access, HTTPS session cookies, and persistence across application restarts.
+
+## Install on a phone
+
+Open `/owner` or `/manager` on the Render HTTPS URL, then tap **Install app**. Supported Android browsers show an installation prompt. In Safari on iPhone, use **Share → Add to Home Screen**. Each role has its own install identity and starts at its own sign-in page.
+
+An installed app requires internet access for sign-in, reports and saving operations. Offline launches show a connection screen. The app displays an offline notice if the connection drops while entering a shift. Keep that page open to retain unsaved entries, then reconnect and check whether the shift was submitted before trying again. The service worker stores only the public offline screen and installation images.

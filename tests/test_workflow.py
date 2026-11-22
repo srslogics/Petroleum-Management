@@ -93,6 +93,24 @@ class WorkflowTest(unittest.TestCase):
         self.expect(401, "/api/owner/dashboard")
         self.assertEqual(self.browser.response_headers["/api/owner/dashboard"]["Cache-Control"], "no-store")
 
+    def test_pwa_role_manifests_and_offline_assets(self):
+        for role in ("owner", "manager"):
+            manifest = self.expect(200, f"/{role}.webmanifest")
+            # Browser fixture returns non-application/json bodies as bytes.
+            manifest = json.loads(manifest)
+            self.assertEqual((manifest["id"], manifest["start_url"], manifest["display"]),
+                             ("/" + role, "/" + role, "standalone"))
+            page = self.expect(200, "/" + role).decode()
+            self.assertIn(f'/{role}.webmanifest?v=', page)
+            self.assertIn('rel="apple-touch-icon"', page)
+            for icon in manifest["icons"]:
+                self.assertTrue(self.expect(200, icon["src"]).startswith(b"\x89PNG"))
+        self.expect(200, "/offline.html")
+        self.expect(200, "/offline.css")
+        self.expect(200, "/pwa.js")
+        self.expect(200, "/sw.js")
+        self.assertEqual(self.browser.response_headers["/sw.js"]["Cache-Control"], "no-store")
+
     def test_two_consecutive_shifts(self):
         self.assertIn(b"Tuljai Petroleum", self.expect(200, "/manager"))
         self.assertIn(b"Tuljai Petroleum", self.expect(200, "/owner"))

@@ -324,3 +324,35 @@ form > label + label, .password-entry { margin-top: .9rem; }
   .report-table tr, .ledger-columns > .ledger-section, .daily-notes > div { break-inside: avoid; }
   .report-shift-link { color: #151515; min-height: 0; margin: 0 !important; padding: 0; font-size: inherit; }
 }
+
+.connection-banner { padding: .65rem max(1rem, env(safe-area-inset-left)); color: #6c301b; background: #fff0dd; font-size: .85rem; border-bottom: 1px solid #e5bd8c; }
+.install-bar { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: .35rem 1rem; padding: .35rem 1rem; background: #e7eef5; color: #274965; font-size: .8rem; }
+.install-bar button { min-height: 44px; padding: .35rem .8rem; background: white; color: #163d68; border: 1px solid #b0c0d0; border-radius: .45rem; font: inherit; font-weight: 700; }
+dialog { max-width: min(420px, calc(100vw - 40px)); padding: 1.4rem; border: 1px solid var(--line); border-radius: .8rem; color: var(--ink); }
+dialog::backdrop { background: #12263b80; }
+dialog p { margin: .75rem 0 1rem; color: var(--muted); }
+body { padding-bottom: env(safe-area-inset-bottom); }
+html { -webkit-text-size-adjust: 100%; }
+input, select, textarea { scroll-margin-block: 1rem; }
+.table-scroll { max-width: 100%; overscroll-behavior-x: contain; }
+@media (max-width: 650px) {
+  .header-inner { flex-wrap: wrap; padding-top: .5rem; padding-bottom: .4rem; }
+  .header-station { flex: 1; }
+  .app-nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; }
+  .nav-button { min-width: 0; padding-inline: .2rem; font-size: .81rem; }
+  .report-controls { width: 100%; }
+  .report-controls .date-control { flex: 1 1 145px; min-width: 0; }
+  .report-controls > button { flex: 1 1 auto; }
+  .field-grid, .fuel-grid { grid-template-columns: minmax(0, 1fr); }
+  .nozzle-row { grid-template-columns: minmax(0, 1fr); }
+  .entry-header { flex-wrap: wrap; }
+  .login { margin-block: 2.2rem; padding: 1.25rem; }
+  .inventory-grid summary strong { font-size: 1.4rem; }
+  .sales-amount { overflow-wrap: anywhere; font-size: clamp(2rem, 9vw, 3rem); }
+  .key-values dd { min-width: 0; }
+  .review-number { flex-wrap: wrap; }
+  .workspace-header, .entry-header { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+}
+@media print {
+  .install-bar, .connection-banner, dialog { display: none !important; }
+}

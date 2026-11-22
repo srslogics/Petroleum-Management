@@ -72,6 +72,11 @@ CREATE TABLE IF NOT EXISTS reviews (
 STATIC_FILES = {
     "/app.js": "text/javascript", "/styles.css": "text/css", "/daily-report.js": "text/javascript",
     "/tuljai-logo.jpg": "image/jpeg",
+    "/pwa.js": "text/javascript", "/sw.js": "text/javascript", "/offline.html": "text/html",
+    "/offline.css": "text/css", "/owner.webmanifest": "application/manifest+json",
+    "/manager.webmanifest": "application/manifest+json",
+    "/icons/icon-192.png": "image/png", "/icons/icon-512.png": "image/png",
+    "/icons/apple-touch-icon.png": "image/png",
 }
 
 
@@ -696,6 +701,8 @@ class Request:
                 return 200, body, content_type, None
             if path in ("/", "/manager", "/owner"):
                 body = (ROOT / "static" / "index.html").read_bytes()
+                if path == "/manager":
+                    body = body.replace(b'"/owner.webmanifest"', b'"/manager.webmanifest"')
                 if not self.demo:
                     body = body.replace(b'<meta name="demo-mode" content="true">', b'')
                 for asset in STATIC_FILES:
@@ -725,7 +732,7 @@ def create_app(database=None, env=None):
         status, body, content_type, cookie = Request(environ, database, hosted, demo).dispatch()
         path = environ["PATH_INFO"]
         cache_control = "no-store"
-        if (status == 200 and path in STATIC_FILES
+        if (status == 200 and path in STATIC_FILES and path != "/sw.js"
                 and environ.get("QUERY_STRING", "") == "v=" + asset_version(body)):
             cache_control = "public, max-age=31536000, immutable"
         headers = [
