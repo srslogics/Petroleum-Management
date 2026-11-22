@@ -1,6 +1,7 @@
 "use strict";
 
 const root = document.querySelector("#app");
+const installBar = document.querySelector("#install-bar");
 const appName = "Tuljai Petroleum";
 const clientName = "Tuljai Realtors & Petroleum";
 const brandLogo = document.querySelector('meta[name="brand-logo"]')?.content || "/tuljai-logo.jpg";
@@ -76,6 +77,7 @@ function brand() {
 }
 
 function showLogin(message = "") {
+  if (installBar) document.body.append(installBar);
   const demoMode = document.querySelector('meta[name="demo-mode"]');
   root.innerHTML = `<div class="entry">
     <header class="entry-header">${brand()}</header>
@@ -122,20 +124,28 @@ function shell(content, view = "home") {
     ? [["home", "Overview"], ["daily-report", "Daily report"], ["money", "Money"], ["operations", "Operations"], ["exceptions", "Exceptions"], ["settings", "Settings"], ["team", "Team"]]
     : [["home", "Shift operations"], ["requests", "Owner requests"]];
   const shouldFocus = document.activeElement && document.activeElement !== document.body;
+  if (installBar) document.body.append(installBar);
   root.innerHTML = `<a class="skip-link" href="#main-content">Skip to main content</a>
-    <header class="workspace-header">
-      <div class="header-inner">
+    <div class="app-shell">
+      <aside class="workspace-sidebar" aria-label="Workspace">
         ${brand()}
-        <div class="header-station"><strong>${safe(session.station)}</strong><small>${safe(session.station_code)}</small></div>
-        <div class="account"><span class="account-name">${safe(session.name)}</span>
-          <button id="logout" class="sign-out" type="button">Sign out</button>
-        </div>
+        <p class="sidebar-caption">${role === "owner" ? "Station management" : "Daily operations"}</p>
+        <nav class="app-nav" aria-label="${roleTitle} navigation">${navigation.map(([id, label]) =>
+          `<button class="nav-button" id="${id}" type="button" ${view === id ? 'aria-current="page"' : ""}>${navigationIcon(id)}<span>${label}</span></button>`
+        ).join("")}</nav>
+        <div class="sidebar-footer"><span class="sidebar-role">${roleTitle}</span><div id="sidebar-install"></div></div>
+      </aside>
+      <div class="workspace-body">
+        <header class="workspace-header"><div class="header-inner">
+          <div class="header-station"><strong>${safe(session.station)}</strong><small>${safe(session.station_code)}</small></div>
+          <div class="account"><span class="account-avatar" aria-hidden="true">${safe(session.name.slice(0, 1))}</span><span class="account-name">${safe(session.name)}</span>
+            <button id="logout" class="sign-out" type="button">Sign out</button>
+          </div>
+        </div></header>
+        <main id="main-content" data-view="${view}" tabindex="-1" class="page"><p id="notice" role="alert" class="notice" hidden></p>${content}</main>
       </div>
-      <nav class="app-nav" aria-label="${roleTitle} navigation">${navigation.map(([id, label]) =>
-        `<button class="nav-button" id="${id}" type="button" ${view === id ? 'aria-current="page"' : ""}>${label}</button>`
-      ).join("")}</nav>
-    </header>
-    <main id="main-content" tabindex="-1" class="page"><p id="notice" role="alert" class="notice" hidden></p>${content}</main>`;
+    </div>`;
+  if (installBar) document.querySelector('#sidebar-install').append(installBar);
   if (shouldFocus) root.querySelector("main h1")?.focus({ preventScroll: true });
   window.scrollTo(0, 0);
   listen("logout", async () => {
@@ -443,17 +453,16 @@ async function showOwner(data, canRender = () => true) {
   const pending = data.shifts.filter(shift => !shift.reviewed_at).length;
   const missingRates = fuelNames.some(fuel => !data.setup.fuels[fuel].rate);
   shell(`<div class="dashboard-heading">
-    ${heading("OWNER WORKSPACE", "Station overview", businessDay(data.date))}
+    ${heading("", "Station overview", businessDay(data.date))}
     <div class="report-controls"><label class="date-control">Business date<input id="date" type="date" value="${safe(data.date)}"></label>
       <button id="open-daily-report" class="secondary" type="button">Open daily report ${icon("arrow")}</button></div>
   </div>
   ${missingRates ? `<div class="setup-notice"><span class="setup-icon">${icon("warning")}</span>
-    <div><strong>Complete your station setup</strong><p>Set selling rates for Petrol and Diesel to enable the first shift.</p></div>
+    <div><strong>Ready for your first shift?</strong><p>Add Petrol and Diesel rates to get started.</p></div>
     <button id="setup-rates" class="secondary" type="button">Set fuel rates ${icon("arrow")}</button></div>` : ""}
-  ${businessOverview(business)}
   <div class="owner-layout">
     <section class="sales-surface" aria-label="Daily fuel sales">
-      <div class="sales-head"><span>Fuel sales</span><span>${data.shifts.length} submitted shifts</span></div>
+      <div class="sales-head"><span>Fuel sales</span><span class="sales-period">Selected day</span></div>
       <strong class="sales-amount">${money(totalSales)}</strong>
       <p class="sales-caption">${volume(totalVolume)} sold across Petrol and Diesel</p>
       <div class="fuel-performance">${fuelNames.map(fuel => {
@@ -461,19 +470,19 @@ async function showOwner(data, canRender = () => true) {
         return `<div><span class="fuel-name">${fuel}</span><strong>${money(sales.sales)}</strong>
           <span>${volume(sales.litres)} sold</span><small>Selling rate ${data.setup.fuels[fuel].rate ? money(data.setup.fuels[fuel].rate) + " / L" : "not configured"}</small></div>`;
       }).join("")}</div>
-      <div class="sales-foot">Sales recorded for ${safe(businessDay(data.date))}</div>
     </section>
     <aside class="attention-surface">
       <h2>Shift review</h2>
       <strong class="review-number">${pending}<span>awaiting review</span></strong>
-      <p>${pending ? "Open a submitted shift below to check collections and cash differences." :
-        data.shifts.length ? "All submitted shifts for this date have been reviewed." : "Your manager’s submitted shifts will appear here."}</p>
+      <p>${pending ? "Check the shifts below to finish your review." :
+        data.shifts.length ? "All submitted shifts have been checked." : "Submitted shifts will appear here for review."}</p>
       <dl class="review-breakdown"><div><dt>Submitted</dt><dd>${data.shifts.length}</dd></div>
         <div><dt>Reviewed</dt><dd>${data.shifts.length - pending}</dd></div>
         <div><dt>Cash differences</dt><dd>${data.shifts.filter(shift => shift.cash_difference !== 0).length} shifts</dd></div></dl>
     </aside>
+    ${businessOverview(business)}
     <section class="inventory-surface">
-      <header class="section-head"><div><h2>Fuel inventory</h2><p>Calculated through the latest submitted shift</p></div></header>
+      <header class="section-head"><div><h2>Fuel inventory</h2><p>Book stock through the latest submitted shift</p></div></header>
       <div class="inventory-grid">${fuelNames.map(fuel => {
         const item = data.stock[fuel];
         return `<details class="stock-detail">
@@ -505,7 +514,7 @@ async function showOwner(data, canRender = () => true) {
           <td>${reviewStatus(shift)}</td>
           <td><button class="row-action" id="shift-${shift.id}" type="button" aria-label="Open shift ${shift.id} report">${icon("arrow")}</button></td>
         </tr>`).join("")}</tbody>
-      </table></div>` : '<p class="ledger-empty">No shifts submitted for this business date.</p>'}
+      </table></div>` : '<div class="shift-empty">' + icon("receipt") + '<strong>No submitted shifts yet</strong><p>Once a manager closes a shift, its sales and reconciliation will appear here.</p></div>'}
   </section></div>`);
   bindBusinessOverview();
   if (missingRates) listen("setup-rates", openSettings);
@@ -657,3 +666,17 @@ async function initialize() {
 }
 
 initialize();
+
+function navigationIcon(id) {
+  const paths = {
+    home: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    'daily-report': '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/>',
+    money: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M16 14h2"/>',
+    operations: '<path d="M5 20V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v15M3 20h14M8 7h4v4H8zM15 12h2a2 2 0 0 1 2 2v3a1 1 0 0 0 2 0V8l-3-3"/>',
+    exceptions: '<path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v4m0 4h.01"/>',
+    settings: '<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/>',
+    team: '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 5v2"/>',
+    requests: '<path d="M21 11a8 8 0 0 1-8 8H4l-2 3V11a9 9 0 0 1 19 0Z"/><path d="M7 10h9m-9 4h6"/>',
+  };
+  return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[id] || paths.home}</svg>`;
+}

@@ -148,5 +148,13 @@ test('owner controls work through desktop and mobile screens', async t => {
     await page.setViewportSize({width:1440,height:1000});
     await page.screenshot({path:path.join(process.env.OWNER_SCREENSHOT_DIR,'owner-money-desktop.png'),fullPage:true});
   }
+  // The install action and navigation must survive signing out and back in.
+  await page.getByRole('button',{name:'Sign out',exact:true}).click();
+  await page.getByRole('button',{name:'Fill demo sign-in'}).click();
+  await page.getByRole('button',{name:'Sign in',exact:true}).click();
+  await page.getByRole('heading',{name:'Station overview'}).waitFor();
+  assert.equal(await page.locator('#install-app').count(),1);
+  await page.getByRole('button',{name:'Operations',exact:true}).click();
+  await page.getByRole('heading',{name:'Operations',exact:true}).waitFor();
   assert.deepEqual(errors,[]);
 });
