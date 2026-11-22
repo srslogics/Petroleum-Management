@@ -335,7 +335,7 @@ function denominationTrayHtml() {
   </div>`;
 }
 
-function bindDenominationCalc(form, active) {
+function bindDenominationCalc(form) {
   const toggleBtn = form.querySelector("#denom-toggle-btn");
   const tray = form.querySelector("#denom-tray");
   if (!toggleBtn || !tray) return;
@@ -347,7 +347,9 @@ function bindDenominationCalc(form, active) {
 
   const update = (syncToCounted = true) => {
     let totalPaisa = 0;
+    let valid = true;
     form.querySelectorAll("[data-denom]").forEach(input => {
+      valid = valid && input.validity.valid;
       const denom = input.dataset.denom;
       const count = Number(input.value || 0);
       let rowPaisa = 0;
@@ -361,10 +363,10 @@ function bindDenominationCalc(form, active) {
       if (sub) sub.textContent = money(rowPaisa);
     });
     const totalEl = form.querySelector("#denom-total");
-    if (totalEl) totalEl.textContent = money(totalPaisa);
-    if (syncToCounted && totalPaisa > 0) {
+    if (totalEl) totalEl.textContent = valid ? money(totalPaisa) : "—";
+    if (syncToCounted && valid) {
       form.elements.counted.value = (totalPaisa / 100).toFixed(2);
-      updatePreview(form, active);
+      form.elements.counted.dispatchEvent(new Event("input", { bubbles: true }));
     }
   };
 
@@ -378,14 +380,24 @@ function bindDenominationCalc(form, active) {
       form.querySelectorAll("[data-denom]").forEach(input => { input.value = ""; });
       update(false);
       form.elements.counted.value = "";
-      updatePreview(form, active);
+      form.elements.counted.dispatchEvent(new Event("input", { bubbles: true }));
     });
   }
 
   const applyBtn = form.querySelector("#denom-apply-btn");
   if (applyBtn) {
-    applyBtn.addEventListener("click", () => update(true));
+    applyBtn.addEventListener("click", () => {
+      const invalid = [...form.querySelectorAll("[data-denom]")].find(input => !input.validity.valid);
+      if (invalid) {
+        tray.hidden = false;
+        toggleBtn.textContent = "Close Tray";
+        invalid.reportValidity();
+        return;
+      }
+      update(true);
+    });
   }
+  return () => update(false);
 }
 
 function saveShiftDraft(activeId, form) {
@@ -556,7 +568,7 @@ function showClosing(active) {
     await showHome();
   });
   bindManagerEntries(form, active);
-  bindDenominationCalc(form, active);
+  const refreshDenominations = bindDenominationCalc(form);
 
   // Stepper tab navigation
   form.querySelectorAll("[data-step-target]").forEach(btn => {
@@ -572,6 +584,7 @@ function showClosing(active) {
   });
 
   restoreShiftDraft(active.id, form, active);
+  refreshDenominations();
   form.addEventListener("input", () => saveShiftDraft(active.id, form));
   form.addEventListener("change", () => saveShiftDraft(active.id, form));
   updatePreview(form, active);
