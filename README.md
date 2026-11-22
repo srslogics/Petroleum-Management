@@ -93,6 +93,18 @@ python3 -m unittest discover -s tests -v
 
 The tests call the WSGI application directly with temporary databases. Hosted-path tests exercise the Turso HTTP protocol against a local SQLite fixture. They do not require a Turso Cloud connection. They cover two consecutive shifts, carry-forward, rate history, duplicate protection, daily totals, stock, reviews, role and station access, HTTPS session cookies, and persistence across application restarts.
 
+### Verify the cash calculator in Chromium
+
+Browser regression tests require Node.js 20+ as a development tool; the app still runs without Node.js or a build step.
+
+```sh
+npm ci
+npx playwright install chromium
+npm test
+```
+
+The test starts a local server on an available port with a temporary SQLite database and demo accounts, then removes it after the run. It covers zero cash, invalid note counts, restored tray totals, and immediate draft updates after Apply or Clear. Set `PYTHON` if your Python executable is named differently from `python3`.
+
 ## Install on a phone
 
 Open `/owner` or `/manager` on the Render HTTPS URL, then tap **Install app**. Supported Android browsers show an installation prompt. In Safari on iPhone, use **Share → Add to Home Screen**. Each role has its own install identity and starts at its own sign-in page.
