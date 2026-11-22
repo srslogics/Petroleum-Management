@@ -20,7 +20,7 @@ from urllib.parse import parse_qs
 from wsgiref.simple_server import WSGIServer, make_server
 from zoneinfo import ZoneInfo
 
-from database import TursoDatabase, open_db, transaction
+from database import TursoDatabase, open_db, require_turso_driver, transaction
 
 ROOT = Path(__file__).resolve().parent
 TZ = ZoneInfo("Asia/Kolkata")
@@ -603,6 +603,7 @@ def main():
     if args.command == "setup-owner":
         env = os.environ.copy()
         try:
+            require_turso_driver()
             if not env.get("TURSO_DATABASE_URL"):
                 env["TURSO_DATABASE_URL"] = input("Turso database URL: ")
             if not env.get("TURSO_AUTH_TOKEN"):

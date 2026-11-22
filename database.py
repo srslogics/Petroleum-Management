@@ -1,9 +1,23 @@
 """SQLite for local development and libSQL for Turso Cloud."""
 import sqlite3
+import sys
 import time
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
+from shlex import quote
 from urllib.parse import urlsplit
+
+
+def require_turso_driver():
+    try:
+        import libsql
+    except ModuleNotFoundError as error:
+        if error.name != "libsql":
+            raise
+        raise RuntimeError(
+            f"Turso driver is missing. Run: {quote(sys.executable)} -m pip install -r requirements.txt"
+        ) from None
+    return libsql
 
 
 @dataclass(frozen=True)
@@ -31,7 +45,7 @@ class TursoDatabase:
         return cls(url.rstrip("/"), token)
 
     def connect(self):
-        import libsql
+        libsql = require_turso_driver()
 
         try:
             connection = libsql.connect(database=self.url, auth_token=self.token, isolation_level=None)

@@ -36,8 +36,9 @@ Use `turso auth login` if the CLI asks you to sign in. Copy the database URL and
 From the repository, run:
 
 ```sh
-python3 -m pip install -r requirements.txt
-python3 app.py setup-owner
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python app.py setup-owner
 ```
 
 Enter the Turso URL and token when prompted, then enter the owner's mobile number and a password of 7–200 characters. The command saves the account in Turso with a password hash. An existing owner can continue signing in with their original credentials.
