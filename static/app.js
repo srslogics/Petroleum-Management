@@ -60,6 +60,7 @@ function showLanding() {
 }
 
 function showLogin(message = "") {
+  const demoMode = document.querySelector('meta[name="demo-mode"]');
   root.innerHTML = `<div class="entry">
     <header class="entry-header">${brand()}<a href="/${role === "owner" ? "manager" : "owner"}">Switch app ↗</a></header>
     <main class="login card">
@@ -70,15 +71,16 @@ function showLogin(message = "") {
         <div class="form-error" role="alert">${safe(message)}</div>
         <button class="primary">Sign in</button>
       </form>
-      <button id="demo" type="button" class="text-button">Fill demo sign-in</button>
+      ${demoMode ? '<button id="demo" type="button" class="text-button">Fill demo sign-in</button>' : ""}
     </main>
   </div>`;
   const login = document.querySelector("#login");
-  document.querySelector("#demo").onclick = () => {
+  const demoButton = document.querySelector("#demo");
+  demoButton?.addEventListener("click", () => {
     login.elements.email.value = role + "@demo.local";
     login.elements.password.value = role === "owner" ? "OwnerDemo123!" : "ManagerDemo123!";
     login.querySelector("button").focus();
-  };
+  });
   bindForm("login", async form => {
     await api("/login", fields(form));
     session = await api("/session");

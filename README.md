@@ -17,6 +17,16 @@ The server listens on loopback. The first start creates `data/petroleum.sqlite3`
 
 Each app has a **Fill demo sign-in** button. Keep both apps open in separate tabs to switch between roles. The owner can set starting stock before the first submission and add nozzles or change rates in **Settings**. A newly added nozzle needs a manual opening reading the first time it appears in a shift.
 
+## Deploy on Render
+
+1. In the [Render Dashboard](https://dashboard.render.com/), choose **New → Blueprint**, connect `srslogics/Petroleum-Management`, and select `main`. The repository's `render.yaml` configures one Python web service in Singapore with Gunicorn, a health check at `/healthz`, and a 1 GB persistent disk at `/var/data`. The Starter service and disk are paid resources.
+2. When prompted, set `PETROLEUM_OWNER_EMAIL`, `PETROLEUM_OWNER_PASSWORD`, `PETROLEUM_MANAGER_EMAIL`, and `PETROLEUM_MANAGER_PASSWORD`. Use distinct emails and strong, unique passwords of at least 16 characters. To use your own station label, set `PETROLEUM_STATION_NAME` and `PETROLEUM_STATION_CODE` in the service environment before the first start.
+3. Once the service is live, open `/owner` on its HTTPS URL. In **Settings**, enter the station's opening stock and current Petrol and Diesel rates, and confirm the nozzle list. The service starts with one nozzle per fuel (`P-01` and `D-01`), and **Add nozzle** lets you record additional meters. Open `/manager` to enter the first shift's meter readings.
+
+The hosted database is created on first start at `/var/data/petroleum.sqlite3`. It starts with zero opening stock, unset selling rates and the two accounts you supplied. Account credentials and station labels are read when creating a new database. Changing those environment variables later does not update existing accounts or station labels.
+
+Keep the disk mounted and use one service instance for this SQLite setup. The disk preserves records across restarts and deploys. Render briefly stops the old instance when deploying a service with a disk.
+
 ## Reconciliation assumptions
 
 - A station can have one open shift at a time. Its business date is the calendar date on which it opened in Asia/Kolkata, including shifts submitted after midnight. The daily summary includes every submitted shift assigned to that date.
@@ -32,4 +42,4 @@ Each app has a **Fill demo sign-in** button. Keep both apps open in separate tab
 python3 -m unittest discover -s tests -v
 ```
 
-The tests use a temporary database and send HTTP requests to the real request handler through a local socket pair. They verify manual opening, two consecutive submissions, carry-forward, rate history, validation, duplicate protection, daily totals, stock, review and role and station access.
+The tests call the WSGI application directly with temporary SQLite databases. They cover two consecutive shifts, carry-forward, rate history, duplicate protection, daily totals, stock, reviews, role and station access, HTTPS session cookies, and persistence across application restarts.

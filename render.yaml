@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: petroleum-management
+    runtime: python
+    plan: starter
+    region: singapore
+    numInstances: 1
+    buildCommand: python -m pip install -r requirements.txt && python -m unittest discover -s tests -v
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --preload 'app:create_app()'
+    healthCheckPath: /healthz
+    disk:
+      name: petroleum-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PETROLEUM_HOSTED
+        value: "1"
+      - key: PETROLEUM_DB
+        value: /var/data/petroleum.sqlite3
+      - key: PETROLEUM_OWNER_EMAIL
+        sync: false
+      - key: PETROLEUM_OWNER_PASSWORD
+        sync: false
+      - key: PETROLEUM_MANAGER_EMAIL
+        sync: false
+      - key: PETROLEUM_MANAGER_PASSWORD
+        sync: false

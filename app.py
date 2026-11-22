@@ -1,7 +1,8 @@
-"""Local Phase 1 HTTP server and SQLite persistence."""
+"""Petroleum Management WSGI application and SQLite persistence."""
 import argparse
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -11,10 +12,11 @@ from contextlib import closing, contextmanager
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from http import HTTPStatus
-from http.cookies import SimpleCookie
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from socketserver import ThreadingMixIn
+from urllib.parse import parse_qs
+from wsgiref.simple_server import WSGIServer, make_server
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent
@@ -87,21 +89,51 @@ def open_db(path):
     return db
 
 
-def initialize(path):
+def hosted_users(env):
+    users = []
+    for role in ("manager", "owner"):
+        prefix = f"PETROLEUM_{role.upper()}"
+        email = env.get(prefix + "_EMAIL", "").strip().lower()
+        password = env.get(prefix + "_PASSWORD", "")
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+", email) or len(email) > 254:
+            raise RuntimeError(f"Set {prefix}_EMAIL to a valid email address.")
+        if any(email == demo[1] for demo in DEMO_USERS):
+            raise RuntimeError(f"Use a non-demo email for {prefix}_EMAIL.")
+        if not 16 <= len(password) <= 200 or any(password == demo[3] for demo in DEMO_USERS):
+            raise RuntimeError(f"Set {prefix}_PASSWORD to a unique password of 16–200 characters.")
+        users.append((role, email, "Station Manager" if role == "manager" else "Owner", password))
+    if users[0][1] == users[1][1] or users[0][3] == users[1][3]:
+        raise RuntimeError("Use a different email and password for each role.")
+    return users
+
+
+def initialize(path, hosted=False, env=None):
+    env = os.environ if env is None else env
+    if hosted and not path.parent.is_dir():
+        raise RuntimeError("The database directory is missing. Check the persistent disk mount.")
     path.parent.mkdir(parents=True, exist_ok=True)
     with closing(open_db(path)) as db, db:
         db.executescript(SCHEMA)
         db.execute("BEGIN IMMEDIATE")
         if db.execute("SELECT 1 FROM stations LIMIT 1").fetchone():
+            if hosted and db.execute("SELECT 1 FROM users WHERE email IN (?, ?)",
+                                     tuple(user[1] for user in DEMO_USERS)).fetchone():
+                raise RuntimeError("Use a fresh hosted database. The configured database contains demo accounts.")
             return
-        db.execute("INSERT INTO stations VALUES (1, 'Horizon Fuel Station', 'HZN-01')")
-        db.executemany("INSERT INTO fuels VALUES (1, ?, ?, ?)", [
-            ("Petrol", 10450, 8000000), ("Diesel", 9230, 10000000),
-        ])
+        users = hosted_users(env) if hosted else DEMO_USERS
+        if hosted:
+            station = (env.get("PETROLEUM_STATION_NAME", "Fuel Station"),
+                       env.get("PETROLEUM_STATION_CODE", "STATION-01"))
+            fuels = [(fuel, 0, 0) for fuel in FUELS]
+        else:
+            station = ("Horizon Fuel Station", "HZN-01")
+            fuels = [("Petrol", 10450, 8000000), ("Diesel", 9230, 10000000)]
+        db.execute("INSERT INTO stations VALUES (1, ?, ?)", station)
+        db.executemany("INSERT INTO fuels VALUES (1, ?, ?, ?)", fuels)
         db.executemany("INSERT INTO nozzles(station_id, code, fuel) VALUES (1, ?, ?)", [
             ("P-01", "Petrol"), ("D-01", "Diesel"),
         ])
-        for role, email, name, password in DEMO_USERS:
+        for role, email, name, password in users:
             salt = secrets.token_hex(16)
             db.execute("""INSERT INTO users(station_id, role, email, name, salt, password_hash)
                           VALUES (1, ?, ?, ?, ?, ?)""",
@@ -195,6 +227,8 @@ def start_shift(db, user, body):
         setup = state["setup"]
         if not setup["nozzles"]:
             fail("Configure at least one nozzle before opening a shift.", 409)
+        if any(setup["fuels"][fuel]["rate"] <= 0 for fuel in FUELS):
+            fail("Ask the owner to set both fuel rates before opening a shift.", 409)
         for nozzle in setup["nozzles"]:
             nozzle["carried"] = nozzle["opening"] is not None
             if not nozzle["carried"]:
@@ -351,38 +385,39 @@ def save_config(db, sid, body):
         return config(db, sid)
 
 
-class Handler(BaseHTTPRequestHandler):
-    def reply(self, status, body, content_type="application/json; charset=utf-8", cookie=None):
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'")
-        if cookie:
-            self.send_header("Set-Cookie", cookie)
-        self.end_headers()
-        self.wfile.write(body)
+class Request:
+    def __init__(self, environ, database, hosted):
+        self.environ = environ
+        self.database = database
+        self.hosted = hosted
 
     def payload(self):
-        if self.headers.get_content_type() != "application/json":
+        if self.environ.get("CONTENT_TYPE", "").partition(";")[0].strip().lower() != "application/json":
             fail("Send a JSON request.", 415)
-        origin = self.headers.get("Origin")
-        if origin and origin != f'http://{self.headers.get("Host")}':
+        origin = self.environ.get("HTTP_ORIGIN")
+        scheme = "https" if self.hosted else self.environ["wsgi.url_scheme"]
+        if origin and origin != f'{scheme}://{self.environ.get("HTTP_HOST")}':
             fail("Invalid request origin.", 403)
         try:
-            size = int(self.headers.get("Content-Length", "0"))
+            size = int(self.environ.get("CONTENT_LENGTH") or "0")
             if not 0 < size <= 65536:
                 fail("Invalid request size.", 413)
-            return mapping(json.loads(self.rfile.read(size)), "request data")
+            return mapping(json.loads(self.environ["wsgi.input"].read(size)), "request data")
         except (ValueError, UnicodeError, RecursionError):
             fail("Invalid JSON request.")
 
     def token(self, role):
         jar = SimpleCookie()
-        jar.load(self.headers.get("Cookie", ""))
+        try:
+            jar.load(self.environ.get("HTTP_COOKIE", ""))
+        except CookieError:
+            return ""
         cookie = jar.get(f"pm_{role}")
         return hashlib.sha256(cookie.value.encode()).hexdigest() if cookie else ""
+
+    def session_cookie(self, role, token, age):
+        secure = "; Secure" if self.hosted else ""
+        return f"pm_{role}={token}; Path=/api/{role}; HttpOnly; SameSite=Strict; Max-Age={age}{secure}"
 
     def authenticated(self, db, role):
         user = db.execute("""SELECT u.id, u.role, u.name, u.station_id, s.name AS station, s.code AS station_code
@@ -395,13 +430,13 @@ class Handler(BaseHTTPRequestHandler):
             fail("This account cannot access this app.", 403)
         return dict(user)
 
-    def api(self, method, url):
-        match = re.fullmatch(r"/api/(manager|owner)(/.*)", url.path)
+    def api(self, method, path):
+        match = re.fullmatch(r"/api/(manager|owner)(/.*)", path)
         if not match:
             fail("Page not found.", 404)
         role, route = match.groups()
         data = self.payload() if method == "POST" else None
-        with closing(open_db(self.server.db_path)) as db:
+        with closing(open_db(self.database)) as db:
             if method == "POST" and route == "/login":
                 email = note(data.get("email", ""), "an email", 254).lower()
                 password = data.get("password", "")
@@ -418,13 +453,13 @@ class Handler(BaseHTTPRequestHandler):
                     db.execute("DELETE FROM sessions WHERE expiry <= ?", (int(time.time()),))
                     db.execute("INSERT INTO sessions VALUES (?, ?, ?)",
                                (hashlib.sha256(token.encode()).hexdigest(), user["id"], int(time.time()) + expiry))
-                return {"ok": True}, f"pm_{role}={token}; Path=/api/{role}; HttpOnly; SameSite=Strict; Max-Age={expiry}"
+                return {"ok": True}, self.session_cookie(role, token, expiry)
             user = self.authenticated(db, role)
             sid = user["station_id"]
             if method == "POST" and route == "/logout":
                 with write(db):
                     db.execute("DELETE FROM sessions WHERE token_hash = ?", (self.token(role),))
-                return {"ok": True}, f"pm_{role}=; Path=/api/{role}; HttpOnly; SameSite=Strict; Max-Age=0"
+                return {"ok": True}, self.session_cookie(role, "", 0)
             if method == "GET" and route == "/session":
                 result = user
             elif role == "manager" and route == "/shift":
@@ -434,7 +469,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     result = start_shift(db, user, data)
             elif role == "owner" and method == "GET" and route == "/dashboard":
-                day = parse_qs(url.query).get("date", [now()[:10]])[0]
+                day = parse_qs(self.environ.get("QUERY_STRING", "")).get("date", [now()[:10]])[0]
                 try:
                     selected = date.fromisoformat(day).isoformat()
                 except ValueError:
@@ -459,35 +494,64 @@ class Handler(BaseHTTPRequestHandler):
                 return review_shift(db, user, shift_id, data)
         fail("Page not found.", 404)
 
-    def dispatch(self, method):
-        url = urlsplit(self.path)
+    def dispatch(self):
+        method = self.environ["REQUEST_METHOD"]
+        path = self.environ["PATH_INFO"]
+        json_type = "application/json; charset=utf-8"
         try:
-            if url.path.startswith("/api/"):
-                result, cookie = self.api(method, url)
-                self.reply(200, json.dumps(result).encode(), cookie=cookie)
-                return
-            if method != "GET":
+            if path.startswith("/api/") and method in ("GET", "POST"):
+                result, cookie = self.api(method, path)
+                return 200, json.dumps(result).encode(), json_type, cookie
+            if method not in ("GET", "HEAD") or (method == "HEAD" and path.startswith("/api/")):
                 fail("Page not found.", 404)
+            if path == "/healthz":
+                with closing(sqlite3.connect(f"{self.database.resolve().as_uri()}?mode=ro", uri=True, timeout=1)) as db:
+                    if not db.execute("SELECT 1 FROM stations LIMIT 1").fetchone():
+                        fail("Database unavailable.", 503)
+                return 200, b'{"ok":true}', json_type, None
             assets = {
                 "/": ("index.html", "text/html"), "/manager": ("index.html", "text/html"),
                 "/owner": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"),
                 "/styles.css": ("styles.css", "text/css"),
             }
-            if url.path not in assets:
+            if path not in assets:
                 fail("Page not found.", 404)
-            name, content_type = assets[url.path]
-            self.reply(200, (ROOT / "static" / name).read_bytes(), f"{content_type}; charset=utf-8")
+            name, content_type = assets[path]
+            body = (ROOT / "static" / name).read_bytes()
+            if name == "index.html" and self.hosted:
+                body = body.replace(b'<meta name="demo-mode" content="true">', b'')
+            return 200, body, f"{content_type}; charset=utf-8", None
         except RequestError as error:
-            self.reply(error.status, json.dumps({"error": str(error)}).encode())
+            return error.status, json.dumps({"error": str(error)}).encode(), json_type, None
         except sqlite3.OperationalError:
-            self.log_error("Database request failed")
-            self.reply(HTTPStatus.SERVICE_UNAVAILABLE, b'{"error":"Database unavailable. Try again."}')
+            logging.exception("Database request failed")
+            return 503, b'{"error":"Database unavailable. Try again."}', json_type, None
 
-    def do_GET(self):
-        self.dispatch("GET")
 
-    def do_POST(self):
-        self.dispatch("POST")
+def create_app(database=None, env=None):
+    env = os.environ if env is None else env
+    hosted = env.get("PETROLEUM_HOSTED") == "1" or env.get("RENDER") == "true"
+    configured_db = env.get("PETROLEUM_DB")
+    if hosted and not (configured_db and Path(configured_db).is_absolute()):
+        raise RuntimeError("Set PETROLEUM_DB to an absolute path on the persistent disk.")
+    database = Path(configured_db if hosted else database or configured_db or ROOT / "data" / "petroleum.sqlite3")
+    initialize(database, hosted, env)
+
+    def application(environ, start_response):
+        status, body, content_type, cookie = Request(environ, database, hosted).dispatch()
+        headers = [
+            ("Content-Type", content_type),
+            ("Content-Length", str(len(body))),
+            ("Cache-Control", "no-store"),
+            ("X-Content-Type-Options", "nosniff"),
+            ("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'"),
+        ]
+        if cookie:
+            headers.append(("Set-Cookie", cookie))
+        start_response(f"{status} {HTTPStatus(status).phrase}", headers)
+        return [b"" if environ["REQUEST_METHOD"] == "HEAD" else body]
+
+    return application
 
 
 @contextmanager
@@ -498,19 +562,16 @@ def read_snapshot(db):
         yield
 
 
-def make_server(host, port, database):
-    initialize(database)
-    server = ThreadingHTTPServer((host, port), Handler)
-    server.db_path = database
-    return server
+class LocalServer(ThreadingMixIn, WSGIServer):
+    daemon_threads = True
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--db", type=Path, default=Path(os.environ.get("PETROLEUM_DB", ROOT / "data" / "petroleum.sqlite3")))
+    parser.add_argument("--db", type=Path)
     args = parser.parse_args()
-    with make_server("127.0.0.1", args.port, args.db) as server:
+    with make_server("127.0.0.1", args.port, create_app(args.db), server_class=LocalServer) as server:
         print(f"Petroleum Management listening at http://127.0.0.1:{server.server_port}", flush=True)
         try:
             server.serve_forever()

@@ -1,56 +1,58 @@
-"""Exercise the actual HTTP handler and SQLite without binding a TCP port."""
-import http.client
+"""Exercise the WSGI application and SQLite without binding a TCP port."""
+import io
 import json
-import socket
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.parse import urlsplit
+from wsgiref.util import setup_testing_defaults
+from wsgiref.validate import validator
 
-from app import Handler, initialize, open_db
-
-
-class CallHandler(Handler):
-    def log_message(self, *args):
-        pass
+from app import create_app, open_db
 
 
 class Browser:
-    def __init__(self, database):
-        self.database = database
+    def __init__(self, application, host="local.test", origin="http://local.test"):
+        self.application = validator(application)
+        self.host = host
+        self.origin = origin
         self.cookies = {}
+        self.set_cookies = {}
 
-    def request(self, path, data=None, cookie=None):
+    def request(self, path, data=None, cookie=None, origin=None):
         method = "GET" if data is None else "POST"
         payload = b"" if data is None else json.dumps(data).encode()
         role = path.split("/")[2] if path.startswith("/api/") else ""
         cookie = self.cookies.get(role, "") if cookie is None else cookie
-        request = (
-            f"{method} {path} HTTP/1.0\r\nHost: local.test\r\nCookie: {cookie}\r\n"
-            f"Origin: http://local.test\r\nContent-Type: application/json\r\nContent-Length: {len(payload)}\r\n\r\n"
-        ).encode() + payload
-        client, server = socket.socketpair()
+        url = urlsplit(path)
+        environ = {}
+        setup_testing_defaults(environ)
+        environ.update({
+            "REQUEST_METHOD": method, "PATH_INFO": url.path, "QUERY_STRING": url.query,
+            "HTTP_HOST": self.host, "HTTP_ORIGIN": self.origin if origin is None else origin,
+            "HTTP_COOKIE": cookie, "CONTENT_TYPE": "application/json",
+            "CONTENT_LENGTH": str(len(payload)), "wsgi.input": io.BytesIO(payload),
+        })
+        response = {}
 
-        def handle():
-            with server:
-                CallHandler(server, ("local.test", 0), SimpleNamespace(db_path=self.database))
+        def start_response(status, headers):
+            response.update(status=int(status.split()[0]), headers=dict(headers))
 
-        with client, ThreadPoolExecutor(max_workers=1) as pool:
-            client.sendall(request)
-            result = pool.submit(handle)
-            response = http.client.HTTPResponse(client)
-            response.begin()
-            if response.getheader("Set-Cookie"):
-                self.cookies[role] = response.getheader("Set-Cookie").split(";", 1)[0]
-            body = response.read()
-            result.result()
-            if response.getheader("Content-Type").startswith("application/json"):
-                body = json.loads(body)
-            return response.status, body
-
+        chunks = self.application(environ, start_response)
+        try:
+            body = b"".join(chunks)
+        finally:
+            chunks.close()
+        headers = response["headers"]
+        if "Set-Cookie" in headers:
+            self.set_cookies[role] = headers["Set-Cookie"]
+            self.cookies[role] = headers["Set-Cookie"].split(";", 1)[0]
+        if headers["Content-Type"].startswith("application/json"):
+            body = json.loads(body)
+        return response["status"], body
 
 
 class WorkflowTest(unittest.TestCase):
@@ -58,8 +60,7 @@ class WorkflowTest(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.database = Path(temp.name) / "test.sqlite3"
-        initialize(self.database)
-        self.browser = Browser(self.database)
+        self.browser = Browser(create_app(self.database, env={}))
         time = patch("app.now", return_value="2026-11-22T10:00:00+05:30")
         self.addCleanup(time.stop)
         self.now = time.start()
@@ -161,6 +162,55 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(self.expect(200, "/api/owner/dashboard")["shifts"], [])
         self.expect(200, "/api/owner/logout", {})
         self.expect(401, "/api/owner/dashboard")
+
+
+class HostedTest(unittest.TestCase):
+    def test_configure_hosted_station_and_reopen_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "petroleum.sqlite3"
+            env = {"RENDER": "true", "PETROLEUM_DB": str(database)}
+            with self.assertRaisesRegex(RuntimeError, "PETROLEUM_MANAGER_EMAIL"):
+                create_app(env=env)
+            owner = {"email": "owner@example.test", "password": "Hosted-owner-test-password"}
+            manager = {"email": "manager@example.test", "password": "Hosted-manager-test-password"}
+            env.update({
+                "PETROLEUM_OWNER_EMAIL": owner["email"], "PETROLEUM_OWNER_PASSWORD": owner["password"],
+                "PETROLEUM_MANAGER_EMAIL": manager["email"], "PETROLEUM_MANAGER_PASSWORD": manager["password"],
+            })
+            browser = Browser(create_app(env=env), "pump.onrender.com", "https://pump.onrender.com")
+            self.assertEqual(browser.request("/healthz"), (200, {"ok": True}))
+            self.assertNotIn(b'demo-mode', browser.request("/manager")[1])
+            self.assertEqual(browser.request("/api/owner/login", owner, origin="https://unrelated.test")[0], 403)
+            self.assertEqual(browser.request("/api/owner/login", owner, origin="http://pump.onrender.com")[0], 403)
+            self.assertEqual(browser.request("/api/owner/login", owner)[0], 200)
+            self.assertIn("; Secure", browser.set_cookies["owner"])
+            self.assertEqual(browser.request("/api/manager/login", manager)[0], 200)
+            openings = {"openings": {"1": "100", "2": "200"}}
+            self.assertEqual(browser.request("/api/manager/shift", openings)[0], 409)
+            self.assertEqual(browser.request("/api/owner/settings", {"rates": {"Petrol": "105", "Diesel": "90"}})[0], 200)
+            status, shift = browser.request("/api/manager/shift", openings)
+            self.assertEqual(status, 200)
+            self.assertEqual(browser.request(f"/api/manager/shifts/{shift['id']}/submit", {
+                "closings": {"1": "120", "2": "210"}, "collections": {"cash": "3000"}, "counted": "3000",
+            })[0], 200)
+            restarted = Browser(create_app(env={"RENDER": "true", "PETROLEUM_DB": str(database)}),
+                                "pump.onrender.com", "https://pump.onrender.com")
+            restarted.cookies = browser.cookies.copy()
+            self.assertEqual(restarted.request(f"/api/owner/shifts/{shift['id']}")[1]["sales"], 300000)
+            self.assertEqual(restarted.request("/api/owner/logout", {})[0], 200)
+            self.assertIn("; Secure", restarted.set_cookies["owner"])
+            self.assertEqual(restarted.request("/api/owner/dashboard")[0], 401)
+
+    def test_reject_hosted_demo_db_and_missing_disk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "demo.sqlite3"
+            create_app(database, env={})
+            with self.assertRaisesRegex(RuntimeError, "contains demo accounts"):
+                create_app(env={"RENDER": "true", "PETROLEUM_DB": str(database)})
+            with self.assertRaisesRegex(RuntimeError, "persistent disk mount"):
+                create_app(env={"RENDER": "true", "PETROLEUM_DB": str(database.parent / "missing" / "app.db")})
+            with self.assertRaisesRegex(RuntimeError, "absolute path"):
+                create_app(env={"RENDER": "true"})
 
 
 if __name__ == "__main__":
