@@ -1,6 +1,7 @@
 """Petroleum Management WSGI application."""
 import argparse
 import hashlib
+from html import escape
 import json
 import logging
 import os
@@ -16,7 +17,7 @@ from http import HTTPStatus
 from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 from socketserver import ThreadingMixIn
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 from wsgiref.simple_server import WSGIServer, make_server
 from zoneinfo import ZoneInfo
 
@@ -554,11 +555,12 @@ def create_manager(db, station_id, data):
 
 
 class Request:
-    def __init__(self, environ, database, hosted, demo):
+    def __init__(self, environ, database, hosted, demo, public_url="https://petroleum-management.onrender.com"):
         self.environ = environ
         self.database = database
         self.hosted = hosted
         self.demo = demo
+        self.public_url = public_url
 
     def payload(self):
         if self.environ.get("CONTENT_TYPE", "").partition(";")[0].strip().lower() != "application/json":
@@ -701,6 +703,20 @@ class Request:
                 return 200, body, content_type, None
             if path in ("/", "/manager", "/owner"):
                 body = (ROOT / "static" / "index.html").read_bytes()
+                titles = {
+                    "/": ("Tuljai Realtors & Petroleum", "Petrol and Diesel station management for Tuljai Realtors & Petroleum."),
+                    "/owner": ("Tuljai Petroleum | Owner App", "View daily fuel sales, payments, stock and shift reports."),
+                    "/manager": ("Tuljai Petroleum | Station Manager App", "Manage shift readings, fuel deliveries, collections and cash reconciliation."),
+                }
+                title, description = titles[path]
+                preview = self.public_url + "/tuljai-logo.jpg?v=" + asset_version(
+                    (ROOT / "static" / "tuljai-logo.jpg").read_bytes())
+                metadata = {
+                    "__PAGE_TITLE__": title, "__PAGE_DESCRIPTION__": description,
+                    "__PAGE_URL__": self.public_url + path, "__PREVIEW_IMAGE__": preview,
+                }
+                for placeholder, value in metadata.items():
+                    body = body.replace(placeholder.encode(), escape(value, quote=True).encode())
                 if path == "/manager":
                     body = body.replace(b'"/owner.webmanifest"', b'"/manager.webmanifest"')
                 if not self.demo:
@@ -727,9 +743,15 @@ def create_app(database=None, env=None):
     demo = turso is None
     database = turso or Path(database or env.get("PETROLEUM_DB") or ROOT / "data" / "petroleum.sqlite3")
     initialize(database, demo, env)
+    public_url = env.get("PUBLIC_APP_URL") or env.get("RENDER_EXTERNAL_URL") or "https://petroleum-management.onrender.com"
+    public_url = public_url.rstrip("/")
+    parsed = urlsplit(public_url)
+    if (parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username
+            or parsed.password or parsed.query or parsed.fragment or parsed.path):
+        raise RuntimeError("PUBLIC_APP_URL must be the public app origin, such as https://your-app.onrender.com.")
 
     def application(environ, start_response):
-        status, body, content_type, cookie = Request(environ, database, hosted, demo).dispatch()
+        status, body, content_type, cookie = Request(environ, database, hosted, demo, public_url).dispatch()
         path = environ["PATH_INFO"]
         cache_control = "no-store"
         if (status == 200 and path in STATIC_FILES and path != "/sw.js"

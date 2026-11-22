@@ -111,6 +111,31 @@ class WorkflowTest(unittest.TestCase):
         self.expect(200, "/sw.js")
         self.assertEqual(self.browser.response_headers["/sw.js"]["Cache-Control"], "no-store")
 
+    def test_social_previews_are_present_before_sign_in(self):
+        from html.parser import HTMLParser
+
+        class Metadata(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.tags = {}
+            def handle_starttag(self, tag, attributes):
+                attrs = dict(attributes)
+                if tag == "meta":
+                    self.tags[attrs.get("property", attrs.get("name"))] = attrs.get("content")
+
+        for path in ("/", "/owner", "/manager"):
+            page = self.expect(200, path).decode()
+            parser = Metadata()
+            parser.feed(page)
+            self.assertEqual(parser.tags["og:url"], "https://petroleum-management.onrender.com" + path)
+            self.assertTrue(parser.tags["og:title"].startswith("Tuljai"))
+            self.assertEqual(parser.tags["twitter:card"], "summary_large_image")
+            image = parser.tags["og:image"]
+            self.assertEqual(image, parser.tags["twitter:image"])
+            self.assertTrue(self.expect(200, image).startswith(b"\xff\xd8"))
+            self.assertNotIn("__PAGE_", page)
+            self.assertNotIn("password_hash", page)
+
     def test_two_consecutive_shifts(self):
         self.assertIn(b"Tuljai Petroleum", self.expect(200, "/manager"))
         self.assertIn(b"Tuljai Petroleum", self.expect(200, "/owner"))

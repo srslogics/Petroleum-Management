@@ -98,3 +98,7 @@ The tests call the WSGI application directly with temporary databases. Hosted-pa
 Open `/owner` or `/manager` on the Render HTTPS URL, then tap **Install app**. Supported Android browsers show an installation prompt. In Safari on iPhone, use **Share → Add to Home Screen**. Each role has its own install identity and starts at its own sign-in page.
 
 An installed app requires internet access for sign-in, reports and saving operations. Offline launches show a connection screen. The app displays an offline notice if the connection drops while entering a shift. Keep that page open to retain unsaved entries, then reconnect and check whether the shift was submitted before trying again. The service worker stores only the public offline screen and installation images.
+
+## Social link previews
+
+The home, owner and manager URLs serve Open Graph and social card metadata directly in their HTML, with the Tuljai logo as the preview image. On Render the public URL is read from `RENDER_EXTERNAL_URL`. Set `PUBLIC_APP_URL` to your HTTPS origin if you use a custom domain. Social platforms control when they refresh previously shared link previews.
