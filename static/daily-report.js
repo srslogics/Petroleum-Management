@@ -34,9 +34,8 @@ function showDailyReport(data) {
   </div><div class="dashboard-heading">
     ${heading(businessDay(data.date), "Daily report", reportStation())}
     <div class="report-controls"><label class="date-control">Business date<input id="date" type="date" value="${safe(data.date)}"></label>
-      <button id="whatsapp-day" class="share-btn" type="button">${icon("share")} WhatsApp</button>
-      <button id="print-day" class="secondary" type="button">${icon("print")} Print</button>
-      <button id="export-day" class="primary" type="button">${icon("download")} Export CSV</button>
+      <button id="print-day" class="secondary" type="button">Print</button>
+      <button id="export-day" class="primary" type="button">Export CSV</button>
     </div>
   </div>
   ${shifts.length ? "" : '<p class="ledger-empty">No shifts were submitted for this business date.</p>'}
@@ -116,7 +115,6 @@ function showDailyReport(data) {
       ${shift.review_note ? `<p><strong>Owner review note</strong> · ${safe(shift.review_note)}</p>` : ""}
     </div>`).join("")}</div></section>` : ""}</div>`, "daily-report");
   bindDateFilter("/daily-report", showDailyReport);
-  listen("whatsapp-day", () => shareDailyWhatsApp(data));
   listen("print-day", () => window.print());
   listen("export-day", () => downloadDailyReport(data));
   for (const shift of shifts) {
@@ -191,32 +189,4 @@ function downloadDailyReport(data) {
   download.click();
   download.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
-}
-
-function shareDailyWhatsApp(data) {
-  const m = val => rupees.format(val / 100);
-  const l = val => litres.format(val / 1000) + " L";
-  const lines = [
-    `⛽ *${clientName} · Daily Station Report*`,
-    `📅 *Business Date:* ${data.date} (IST)`,
-    `🏢 *Station:* ${session.station} (${session.station_code})`,
-    ``,
-    `📊 *Sales Summary:*`,
-    `• Volume Sold: ${l(data.litres)}`,
-    `• Metered Sales: ${m(data.sales)}`,
-    `• Total Payments Accounted: ${m(data.accounted)}`,
-    `• Difference against Sales: ${m(data.sales_difference)}`,
-    ``,
-    `💵 *Cash Reconciliation:*`,
-    `• Recorded Cash: ${m(data.payments.cash)}`,
-    `• Till Expenses: ${m(data.till.expenses)}`,
-    `• Expected Cash: ${m(data.till.expected)}`,
-    `• Actual Counted Cash: ${m(data.till.counted)}`,
-    `• Cash Shortages: ${m(data.till.shortage)}`,
-    `• Cash Overages: ${m(data.till.overage)}`,
-    `• Net Cash Difference: ${m(data.till.cash_difference)}`,
-    ``,
-    `📋 *Shifts Submitted:* ${data.shifts.length} shift(s)`,
-  ];
-  window.open("https://api.whatsapp.com/send?text=" + encodeURIComponent(lines.join("\n")), "_blank");
 }
