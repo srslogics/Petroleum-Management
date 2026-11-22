@@ -85,7 +85,7 @@ class WorkflowTest(unittest.TestCase):
     def test_only_versioned_public_assets_are_cached(self):
         html = self.expect(200, "/owner").decode()
         self.assertEqual(self.browser.response_headers["/owner"]["Cache-Control"], "no-store")
-        for asset in ("/styles.css", "/workspace.css", "/app.js", "/daily-report.js", "/tuljai-logo.jpg"):
+        for asset in ("/styles.css", "/workspace.css", "/typography.css", "/fonts/inter-latin.woff2", "/app.js", "/daily-report.js", "/tuljai-logo.jpg"):
             versioned = re.search(re.escape(asset) + r"\?v=[a-f0-9]{16}", html)[0]
             self.assertEqual(self.expect(200, versioned), self.expect(200, asset))
             self.assertIn("immutable", self.browser.response_headers[versioned]["Cache-Control"])
@@ -107,6 +107,10 @@ class WorkflowTest(unittest.TestCase):
                 self.assertTrue(self.expect(200, icon["src"]).startswith(b"\x89PNG"))
         self.expect(200, "/offline.html")
         self.expect(200, "/offline.css")
+        self.expect(200, "/typography.css")
+        for font in ("/fonts/inter-latin.woff2", "/fonts/inter-latin-ext.woff2"):
+            self.assertTrue(self.expect(200, font).startswith(b"wOF2"))
+            self.assertEqual(self.browser.response_headers[font]["Content-Type"], "font/woff2")
         self.expect(200, "/pwa.js")
         self.expect(200, "/sw.js")
         self.assertEqual(self.browser.response_headers["/sw.js"]["Cache-Control"], "no-store")
