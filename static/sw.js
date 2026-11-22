@@ -1,6 +1,6 @@
 "use strict";
 
-const OFFLINE_CACHE = "tuljai-offline-v1";
+const OFFLINE_CACHE = "tuljai-offline-v2";
 const OFFLINE_PAGE = "/offline.html";
 const OFFLINE_FILES = [OFFLINE_PAGE, "/offline.css", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/apple-touch-icon.png"];
 
