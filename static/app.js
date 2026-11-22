@@ -441,30 +441,37 @@ function showOwner(data) {
   const pending = data.shifts.filter(shift => !shift.reviewed_at).length;
   const missingRates = fuelNames.some(fuel => !data.setup.fuels[fuel].rate);
   shell(`<div class="dashboard-heading">
-    ${heading(businessDay(data.date), "Station overview")}
+    ${heading("OWNER WORKSPACE", "Station overview", businessDay(data.date))}
     <div class="report-controls"><label class="date-control">Business date<input id="date" type="date" value="${safe(data.date)}"></label>
       <button id="open-daily-report" class="secondary" type="button">Open daily report ${icon("arrow")}</button></div>
   </div>
   ${missingRates ? `<div class="setup-notice"><span class="setup-icon">${icon("warning")}</span>
-    <div><strong>Set fuel prices to start selling</strong><p>Enter the Petrol and Diesel rates before a manager opens a shift.</p></div>
+    <div><strong>Complete your station setup</strong><p>Set selling rates for Petrol and Diesel to enable the first shift.</p></div>
     <button id="setup-rates" class="secondary" type="button">Set fuel rates ${icon("arrow")}</button></div>` : ""}
-  <div class="ledger-sheet">
-    ${ledgerSummary([
-      ["Metered sales", money(totalSales)], ["Volume sold", volume(totalVolume)],
-      ["Submitted shifts", data.shifts.length], ["Awaiting review", pending],
-    ])}
-    <div class="ledger-columns">
-    <section class="ledger-section">
-      <header class="section-head"><h2>Sales by fuel</h2></header>
-      <table class="fuel-ledger">
-        <thead><tr><th scope="col">Fuel</th><th scope="col">Litres sold</th><th scope="col">Metered sales</th></tr></thead>
-        <tbody>${fuelNames.map(fuel => `<tr><th scope="row">${fuel}</th>
-          <td>${volume(data.daily[fuel].litres)}</td><td>${money(data.daily[fuel].sales)}</td></tr>`).join("")}</tbody>
-      </table>
+  <div class="owner-layout">
+    <section class="sales-surface" aria-label="Daily fuel sales">
+      <div class="sales-head"><span>Fuel sales</span><span>${data.shifts.length} submitted shifts</span></div>
+      <strong class="sales-amount">${money(totalSales)}</strong>
+      <p class="sales-caption">${volume(totalVolume)} sold across Petrol and Diesel</p>
+      <div class="fuel-performance">${fuelNames.map(fuel => {
+        const sales = data.daily[fuel];
+        return `<div><span class="fuel-name">${fuel}</span><strong>${money(sales.sales)}</strong>
+          <span>${volume(sales.litres)} sold</span><small>Selling rate ${data.setup.fuels[fuel].rate ? money(data.setup.fuels[fuel].rate) + " / L" : "not configured"}</small></div>`;
+      }).join("")}</div>
+      <div class="sales-foot">Sales recorded for ${safe(businessDay(data.date))}</div>
     </section>
-    <section class="ledger-section">
-      <header class="section-head"><div><h2>Fuel stock</h2><p>Balance through the latest submitted shift</p></div></header>
-      <div class="stock-list">${fuelNames.map(fuel => {
+    <aside class="attention-surface">
+      <h2>Shift review</h2>
+      <strong class="review-number">${pending}<span>awaiting review</span></strong>
+      <p>${pending ? "Open a submitted shift below to check collections and cash differences." :
+        data.shifts.length ? "All submitted shifts for this date have been reviewed." : "Your manager’s submitted shifts will appear here."}</p>
+      <dl class="review-breakdown"><div><dt>Submitted</dt><dd>${data.shifts.length}</dd></div>
+        <div><dt>Reviewed</dt><dd>${data.shifts.length - pending}</dd></div>
+        <div><dt>Cash differences</dt><dd>${data.shifts.filter(shift => shift.cash_difference !== 0).length} shifts</dd></div></dl>
+    </aside>
+    <section class="inventory-surface">
+      <header class="section-head"><div><h2>Fuel inventory</h2><p>Calculated through the latest submitted shift</p></div></header>
+      <div class="inventory-grid">${fuelNames.map(fuel => {
         const item = data.stock[fuel];
         return `<details class="stock-detail">
           <summary><span>${fuelTag(fuel)}<small>Calculated stock</small></span>
@@ -480,6 +487,7 @@ function showOwner(data) {
       }).join("")}</div>
     </section>
   </div>
+  <div class="ledger-sheet">
   <section class="ledger-section">
     <header class="section-head"><h2 id="shift-heading">Submitted shifts</h2></header>
     ${data.shifts.length ? `<div class="table-scroll" role="region" aria-labelledby="shift-heading" tabindex="0">
