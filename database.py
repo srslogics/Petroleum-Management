@@ -1,23 +1,11 @@
-"""SQLite for local development and libSQL for Turso Cloud."""
+"""SQLite locally and the Turso SQL-over-HTTP API on Render."""
+import json
 import sqlite3
-import sys
 import time
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
-from shlex import quote
+from http.client import HTTPException, HTTPSConnection
 from urllib.parse import urlsplit
-
-
-def require_turso_driver():
-    try:
-        import libsql
-    except ModuleNotFoundError as error:
-        if error.name != "libsql":
-            raise
-        raise RuntimeError(
-            f"Turso driver is missing. Run: {quote(sys.executable)} -m pip install -r requirements.txt"
-        ) from None
-    return libsql
 
 
 @dataclass(frozen=True)
@@ -42,57 +30,136 @@ class TursoDatabase:
             valid = False
         if not valid:
             raise RuntimeError("Set TURSO_DATABASE_URL to the database URL from Turso.")
-        return cls(url.rstrip("/"), token)
+        return cls("https://" + target.netloc, token)
 
     def connect(self):
-        libsql = require_turso_driver()
-
-        try:
-            connection = libsql.connect(database=self.url, auth_token=self.token, isolation_level=None)
-        except (ValueError, libsql.Error):
-            raise sqlite3.OperationalError("Turso connection failed.") from None
-        return TursoConnection(connection)
+        return TursoConnection(self.url, self.token)
 
 
-@contextmanager
-def turso_errors():
-    # The official libsql driver exposes SQL failures as ValueError.
-    import libsql
+def encode_arg(value):
+    if value is None:
+        return {"type": "null"}
+    if isinstance(value, int):
+        return {"type": "integer", "value": str(int(value))}
+    if isinstance(value, str):
+        return {"type": "text", "value": value}
+    raise TypeError("Unsupported SQL parameter type.")
 
-    try:
-        yield
-    except (ValueError, libsql.Error) as error:
-        message = str(error).lower()
-        if "unique constraint failed" in message:
-            raise sqlite3.IntegrityError("A unique database constraint failed.") from None
-        if "database is locked" in message or "sqlite_busy" in message or "transactionbusy" in message:
-            busy = sqlite3.OperationalError("Turso database is busy.")
-            busy.sqlite_errorcode = sqlite3.SQLITE_BUSY
-            raise busy from None
-        raise sqlite3.OperationalError("Turso request failed.") from None
+
+def decode_value(cell):
+    kind = cell["type"]
+    if kind == "null":
+        return None
+    if kind == "integer":
+        return int(cell["value"])
+    if kind in ("float", "text"):
+        return cell["value"]
+    raise ValueError("Unsupported SQL result type.")
+
+
+def execute_request(sql, params=(), want_rows=True):
+    return {"type": "execute", "stmt": {
+        "sql": sql, "args": [encode_arg(value) for value in params], "want_rows": want_rows,
+    }}
+
+
+def check_result(result):
+    if result["type"] == "ok":
+        return result["response"]
+    code = result["error"].get("code") or ""
+    if code.startswith("SQLITE_BUSY") or code in ("SQLITE_LOCKED", "TRANSACTION_BUSY"):
+        error = sqlite3.OperationalError("Turso database is busy.")
+        error.sqlite_errorcode = sqlite3.SQLITE_BUSY
+        raise error
+    if code == "SQLITE_CONSTRAINT_UNIQUE":
+        raise sqlite3.IntegrityError("A unique database constraint failed.")
+    raise sqlite3.OperationalError(f"Turso SQL request failed ({code or 'unknown error'}).")
 
 
 class TursoConnection:
-    def __init__(self, connection):
-        self.connection = connection
+    def __init__(self, url, token):
+        self.host = urlsplit(url).hostname
+        self.connection = HTTPSConnection(self.host, timeout=4)
+        self.token = token
+        self.baton = None
+        self.deadline = time.monotonic() + 18
+        self.closed = False
+
+    def pipeline(self, requests, *, closing=False):
+        remaining = self.deadline - time.monotonic()
+        if self.closed or remaining <= 0:
+            raise sqlite3.OperationalError("Turso request deadline expired.")
+        timeout = min(1 if closing else 4, remaining)
+        self.connection.timeout = timeout
+        if self.connection.sock is not None:
+            self.connection.sock.settimeout(timeout)
+        body = json.dumps({"baton": self.baton, "requests": requests}).encode()
+        try:
+            self.connection.request("POST", "/v2/pipeline", body, {
+                "Authorization": "Bearer " + self.token, "Content-Type": "application/json",
+            })
+            with self.connection.getresponse() as response:
+                if response.status != 200:
+                    raise sqlite3.OperationalError(f"Turso HTTP request failed ({response.status}).")
+                payload = json.load(response)
+            self.baton = payload["baton"]
+            if alternate := payload.get("base_url"):
+                target = urlsplit(alternate)
+                if (target.scheme != "https" or not target.hostname
+                        or target.username is not None or target.port not in (None, 443)
+                        or target.path not in ("", "/") or target.query or target.fragment
+                        or (target.hostname != self.host and not (
+                            self.host.endswith(".turso.io") and target.hostname.endswith(".turso.io")
+                        ))):
+                    raise ValueError("Invalid Turso stream endpoint.")
+                if target.hostname != self.connection.host:
+                    self.connection.close()
+                    self.connection = HTTPSConnection(target.hostname, timeout=timeout)
+            results = payload["results"]
+            if len(results) != len(requests) or (not closing and not self.baton):
+                raise ValueError("Incomplete Turso stream response.")
+            return results
+        except (HTTPException, OSError, KeyError, TypeError, ValueError):
+            self.closed = True
+            self.connection.close()
+            raise sqlite3.OperationalError("Turso connection failed or timed out.") from None
+        except sqlite3.OperationalError:
+            self.closed = True
+            self.connection.close()
+            raise
 
     def execute(self, sql, params=()):
-        with turso_errors():
-            return TursoRows(self.connection.execute(sql, params))
+        request = execute_request(sql, params)
+        requests = [request] if self.baton else [execute_request("PRAGMA foreign_keys = ON", want_rows=False), request]
+        results = self.pipeline(requests)
+        for result in results:
+            result = check_result(result)
+        try:
+            block = result["result"]
+            columns = [column["name"] for column in block["cols"]]
+            return TursoRows(dict(zip(columns, (decode_value(cell) for cell in row))) for row in block["rows"])
+        except (KeyError, TypeError, ValueError):
+            raise sqlite3.OperationalError("Invalid Turso SQL response.") from None
 
     def close(self):
-        self.connection.close()
+        try:
+            if self.baton and not self.closed:
+                with suppress(sqlite3.Error):
+                    self.pipeline([{"type": "close"}], closing=True)
+        finally:
+            self.closed = True
+            self.connection.close()
 
 
 class TursoRows:
-    def __init__(self, cursor):
-        self.cursor = cursor
-        self.columns = [column[0] for column in cursor.description or ()]
+    def __init__(self, rows):
+        self.rows = iter(rows)
 
     def fetchone(self):
-        with turso_errors():
-            row = self.cursor.fetchone()
-        return dict(zip(self.columns, row)) if row is not None else None
+        try:
+            return next(self.rows, None)
+        except (KeyError, TypeError, ValueError):
+            raise sqlite3.OperationalError("Invalid Turso result row.") from None
 
     def __iter__(self):
         while (row := self.fetchone()) is not None:
@@ -101,10 +168,9 @@ class TursoRows:
 
 def open_db(database):
     if isinstance(database, TursoDatabase):
-        db = database.connect()
-    else:
-        db = sqlite3.connect(database, timeout=10)
-        db.row_factory = sqlite3.Row
+        return database.connect()
+    db = sqlite3.connect(database, timeout=10)
+    db.row_factory = sqlite3.Row
     try:
         db.execute("PRAGMA foreign_keys = ON")
     except BaseException:

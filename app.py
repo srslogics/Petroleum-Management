@@ -20,7 +20,7 @@ from urllib.parse import parse_qs
 from wsgiref.simple_server import WSGIServer, make_server
 from zoneinfo import ZoneInfo
 
-from database import TursoDatabase, open_db, require_turso_driver, transaction
+from database import TursoDatabase, open_db, transaction
 
 ROOT = Path(__file__).resolve().parent
 TZ = ZoneInfo("Asia/Kolkata")
@@ -468,8 +468,11 @@ class Request:
             fail("Page not found.", 404)
         role, route = match.groups()
         data = self.payload() if method == "POST" else None
+        login = method == "POST" and route == "/login"
+        if not login and not self.token(role):
+            fail("Sign in to continue.", 401)
         with closing(open_db(self.database)) as db:
-            if method == "POST" and route == "/login":
+            if login:
                 identifier = note(data.get("identifier", data.get("email", "")), "a mobile number or email", 254).lower()
                 login_id = indian_mobile(identifier) or identifier
                 password = data.get("password", "")
@@ -541,9 +544,6 @@ class Request:
             if method not in ("GET", "HEAD") or (method == "HEAD" and path.startswith("/api/")):
                 fail("Page not found.", 404)
             if path == "/healthz":
-                with closing(open_db(self.database)) as db:
-                    if not db.execute("SELECT 1 FROM stations LIMIT 1").fetchone():
-                        fail("Database unavailable.", 503)
                 return 200, b'{"ok":true}', json_type, None
             assets = {
                 "/": ("index.html", "text/html"), "/manager": ("index.html", "text/html"),
@@ -559,9 +559,12 @@ class Request:
             return 200, body, f"{content_type}; charset=utf-8", None
         except RequestError as error:
             return error.status, json.dumps({"error": str(error)}).encode(), json_type, None
-        except sqlite3.OperationalError:
-            logging.exception("Database request failed")
-            return 503, b'{"error":"Database unavailable. Try again."}', json_type, None
+        except sqlite3.OperationalError as error:
+            logging.warning("Database request failed for %s %s: %s", method, path, error)
+            return 503, b'{"error":"Database temporarily unavailable. Please try again."}', json_type, None
+        except Exception:
+            logging.exception("Request failed for %s %s", method, path)
+            return 500, b'{"error":"The service could not complete this request. Please try again."}', json_type, None
 
 
 def create_app(database=None, env=None):
@@ -603,7 +606,6 @@ def main():
     if args.command == "setup-owner":
         env = os.environ.copy()
         try:
-            require_turso_driver()
             if not env.get("TURSO_DATABASE_URL"):
                 env["TURSO_DATABASE_URL"] = input("Turso database URL: ")
             if not env.get("TURSO_AUTH_TOKEN"):

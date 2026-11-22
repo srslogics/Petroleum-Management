@@ -36,9 +36,7 @@ Use `turso auth login` if the CLI asks you to sign in. Copy the database URL and
 From the repository, run:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python app.py setup-owner
+python3 app.py setup-owner
 ```
 
 Enter the Turso URL and token when prompted, then enter the owner's mobile number and a password of 7–200 characters. The command saves the account in Turso with a password hash. An existing owner can continue signing in with their original credentials.
@@ -89,4 +87,4 @@ If your dashboard offers **New → Blueprint**, you can import `render.yaml` fro
 python3 -m unittest discover -s tests -v
 ```
 
-The tests call the WSGI application directly with temporary databases. Hosted-path tests use a local database through libSQL when installed, or SQLite otherwise. They do not require a Turso Cloud connection. They cover two consecutive shifts, carry-forward, rate history, duplicate protection, daily totals, stock, reviews, role and station access, HTTPS session cookies, and persistence across application restarts.
+The tests call the WSGI application directly with temporary databases. Hosted-path tests exercise the Turso HTTP protocol against a local SQLite fixture. They do not require a Turso Cloud connection. They cover two consecutive shifts, carry-forward, rate history, duplicate protection, daily totals, stock, reviews, role and station access, HTTPS session cookies, and persistence across application restarts.

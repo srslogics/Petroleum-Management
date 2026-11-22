@@ -7,14 +7,13 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import urlsplit
 from wsgiref.util import setup_testing_defaults
 from wsgiref.validate import validator
 
 from app import create_app, setup_owner
-from database import TursoDatabase, open_db
+from database import TursoDatabase, encode_arg, open_db
 
 
 class Browser:
@@ -184,23 +183,68 @@ class HostedTest(unittest.TestCase):
             "TURSO_AUTH_TOKEN": "test-only-token",
         }
 
-        try:
-            import libsql
-        except ModuleNotFoundError:
-            libsql = SimpleNamespace(connect=sqlite3.connect, Error=ValueError)
-        driver_connect = libsql.connect
+        database_path = self.database
+        test = self
 
-        def connect(*, database, auth_token, isolation_level):
-            self.assertEqual(database, self.env["TURSO_DATABASE_URL"])
-            self.assertEqual(auth_token, self.env["TURSO_AUTH_TOKEN"])
-            return driver_connect(str(self.database), isolation_level=isolation_level)
+        class PipelineServer:
+            def __init__(self, host, timeout):
+                test.assertEqual(host, "pump-example.turso.io")
+                self.sock = None
+                self.timeout = timeout
+                self.db = sqlite3.connect(database_path, isolation_level=None)
+                self.baton = None
+                test.addCleanup(self.db.close)
 
-        # Render's build exercises the native driver against a local test
-        # file. Local tests can run with SQLite when libsql is unavailable.
-        driver = SimpleNamespace(connect=connect, Error=libsql.Error)
-        modules = patch.dict("sys.modules", {"libsql": driver})
-        self.addCleanup(modules.stop)
-        modules.start()
+            def request(self, method, path, body, headers):
+                test.assertEqual((method, path), ("POST", "/v2/pipeline"))
+                test.assertEqual(headers["Authorization"], "Bearer test-only-token")
+                request = json.loads(body)
+                test.assertEqual(request["baton"], self.baton)
+                results = []
+                for operation in request["requests"]:
+                    if operation["type"] == "close":
+                        self.db.close()
+                        self.baton = None
+                        results.append({"type": "ok", "response": {"type": "close"}})
+                        break
+                    statement = operation["stmt"]
+                    params = [
+                        int(arg["value"]) if arg["type"] == "integer" else arg.get("value")
+                        for arg in statement["args"]
+                    ]
+                    try:
+                        cursor = self.db.execute(statement["sql"], params)
+                        rows = cursor.fetchall()
+                    except sqlite3.Error as error:
+                        results.append({"type": "error", "error": {"code": error.sqlite_errorname}})
+                        continue
+                    results.append({"type": "ok", "response": {"type": "execute", "result": {
+                        "cols": [{"name": column[0]} for column in cursor.description or ()],
+                        "rows": [[encode_arg(value) for value in row] for row in rows],
+                    }}})
+                else:
+                    self.baton = "next:" + (self.baton or "")
+                self.payload = {"baton": self.baton, "base_url": None, "results": results}
+
+            def getresponse(self):
+                response = io.BytesIO(json.dumps(self.payload).encode())
+                response.status = 200
+                return response
+
+            def close(self):
+                self.db.close()
+
+        transport = patch("database.HTTPSConnection", PipelineServer)
+        self.addCleanup(transport.stop)
+        transport.start()
+
+    def test_database_timeout_returns_json_and_keeps_health_responding(self):
+        browser = Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
+        with patch("database.HTTPSConnection.request", side_effect=TimeoutError), self.assertLogs(level="WARNING"):
+            self.assertEqual(browser.request("/api/owner/session")[0], 401)
+            self.assertEqual(browser.request("/api/owner/login", {"identifier": "probe", "password": "probe"}),
+                             (503, {"error": "Database temporarily unavailable. Please try again."}))
+            self.assertEqual(browser.request("/healthz"), (200, {"ok": True}))
 
     def test_configure_hosted_station_and_reopen_database(self):
         env = self.env

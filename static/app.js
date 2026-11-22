@@ -29,10 +29,25 @@ async function api(path, body) {
   const options = body === undefined ? {} : {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   };
-  const response = await fetch("/api/" + role + path, options);
-  const payload = await response.json();
+  let response;
+  try {
+    response = await fetch("/api/" + role + path, options);
+  } catch {
+    throw new Error("Could not reach Pump Ledger. Check your connection and try again.");
+  }
+  const unavailable = "Pump Ledger is temporarily unavailable. Please try again in a moment.";
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().startsWith("application/json")) {
+    throw Object.assign(new Error(unavailable), { status: response.status });
+  }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw Object.assign(new Error(unavailable), { status: response.status });
+  }
   if (!response.ok) {
-    throw Object.assign(new Error(payload.error), { status: response.status });
+    throw Object.assign(new Error(payload?.error || unavailable), { status: response.status });
   }
   return payload;
 }
