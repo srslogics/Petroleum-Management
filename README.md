@@ -40,7 +40,7 @@ python3 -m pip install -r requirements.txt
 python3 app.py setup-owner
 ```
 
-Enter the Turso URL and token when prompted, then enter the owner's mobile number and a unique password of at least 16 characters. The command saves the account in Turso with a password hash. An existing owner can continue signing in with their original credentials.
+Enter the Turso URL and token when prompted, then enter the owner's mobile number and a password of 7–200 characters. The command saves the account in Turso with a password hash. An existing owner can continue signing in with their original credentials.
 
 ### Create the Render Web Service
 

@@ -204,12 +204,14 @@ class HostedTest(unittest.TestCase):
 
     def test_configure_hosted_station_and_reopen_database(self):
         env = self.env
-        owner = {"identifier": "9000000001", "password": "Hosted-owner-test-password"}
-        manager = {"identifier": "9000000002", "password": "Hosted-manager-test-password"}
+        owner = {"identifier": "9000000001", "password": "TestOw7"}
+        manager = {"identifier": "9000000002", "password": "TestMg7"}
         browser = Browser(create_app(env=env), "pump.onrender.com", "https://pump.onrender.com")
         self.assertEqual(browser.request("/healthz"), (200, {"ok": True}))
         self.assertEqual(browser.request("/api/owner/login", owner)[0], 401)
         database = TursoDatabase.from_env(env, required=True)
+        with self.assertRaisesRegex(RuntimeError, "7–200 characters"):
+            setup_owner(database, env, owner["identifier"], "TestOw")
         setup_owner(database, env, "+91 90000 00001", owner["password"])
         with self.assertRaisesRegex(RuntimeError, "An owner already exists"):
             setup_owner(database, env, "9000000003", "Different-test-password")
@@ -221,6 +223,7 @@ class HostedTest(unittest.TestCase):
         self.assertEqual(browser.request("/api/owner/managers"), (200, []))
         self.assertEqual(browser.request("/api/manager/login", manager)[0], 401)
         new_manager = {"name": "Test Manager", "phone": "+91-90000-00002", "password": manager["password"]}
+        self.assertEqual(browser.request("/api/owner/managers", new_manager | {"password": "TestMg"})[0], 400)
         status, created = browser.request("/api/owner/managers", new_manager)
         self.assertEqual((status, created), (200, {"name": "Test Manager", "login_id": "+919000000002"}))
         self.assertEqual(browser.request("/api/owner/managers", new_manager | {"phone": manager["identifier"]})[0], 409)

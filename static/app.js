@@ -456,9 +456,9 @@ function showTeam(managers, added = false) {
           <label>Full name<input name="name" required maxlength="80" autocomplete="off"></label>
           <label>Mobile number<input name="phone" required type="tel" maxlength="24" placeholder="+91" autocomplete="off"></label>
         </div>
-        <label>Password<input name="password" type="password" required minlength="16" maxlength="200"
+        <label>Password<input name="password" type="password" required minlength="7" maxlength="200"
           autocomplete="new-password" aria-describedby="manager-password-help"></label>
-        <small id="manager-password-help">Use a unique password of at least 16 characters.</small>
+        <small id="manager-password-help">Use a password of 7–200 characters.</small>
         ${errorbox}<button class="primary">Create manager account</button>
       </form>
     </section>`);

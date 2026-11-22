@@ -94,7 +94,7 @@ def indian_mobile(value):
 
 
 def valid_new_password(password):
-    return (isinstance(password, str) and 16 <= len(password) <= 200
+    return (isinstance(password, str) and 7 <= len(password) <= 200
             and password not in (account[3] for account in DEMO_USERS))
 
 
@@ -140,7 +140,7 @@ def setup_owner(database, env, phone, password):
     if not phone:
         raise RuntimeError("Enter the owner's Indian mobile number.")
     if not valid_new_password(password):
-        raise RuntimeError("Choose a unique password of 16–200 characters.")
+        raise RuntimeError("Use a password of 7–200 characters.")
     salt = secrets.token_hex(16)
     digest = password_hash(password, salt)
     initialize(database, demo=False, env=env)
@@ -406,7 +406,7 @@ def create_manager(db, station_id, data):
         fail("Enter a valid Indian mobile number.")
     password = data.get("password")
     if not valid_new_password(password):
-        fail("Choose a unique password of 16–200 characters.")
+        fail("Use a password of 7–200 characters.")
     salt = secrets.token_hex(16)
     digest = password_hash(password, salt)
     with transaction(db, immediate=True):
