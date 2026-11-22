@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 
 
 STATIC_FILES = {
-    "/app.js": "text/javascript", "/styles.css": "text/css", "/daily-report.js": "text/javascript",
+    "/app.js": "text/javascript", "/styles.css": "text/css", "/workspace.css": "text/css", "/daily-report.js": "text/javascript",
     "/tuljai-logo.jpg": "image/jpeg",
     "/manager-entries.js": "text/javascript",
     "/owner-business.js": "text/javascript",

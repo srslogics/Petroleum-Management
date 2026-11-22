@@ -2,12 +2,21 @@
 
 function businessOverview(data) {
   const count = data.exceptions.filter(item => !item.acknowledgement).length;
-  return `<section class="card owner-control-summary" aria-label="Owner actions">
-    <div><strong>Current operations</strong><p>${data.active ? `Shift #${data.active.id} · ${safe(data.active.opener)} · open ${data.active.hours} hours${data.active.overdue ? ' · Overdue' : ''}` : 'No shift is currently open.'}</p></div>
-    <button id="overview-operations" type="button" class="secondary">View operations</button>
-    <button id="overview-exceptions" type="button" class="secondary">${count} exceptions need attention</button>
-    <button id="overview-money" type="button" class="secondary">Customer credit ${money(data.customers.reduce((sum, item) => sum + item.balance, 0) + data.unallocated_credit)}</button>
-    <small>Current operations and balances are independent of the report date selected above.</small>
+  const balance = data.customers.reduce((sum, item) => sum + item.balance, 0) + data.unallocated_credit;
+  return `<section class="owner-control-summary" aria-label="Current operations and balances">
+    <button id="overview-operations" type="button" class="overview-action" aria-label="View operations">
+      <span class="action-label">${navigationIcon('operations')} Current shift</span>
+      <strong>${data.active ? 'Shift #' + data.active.id : 'No active shift'}</strong>
+      <span class="action-detail">${data.active ? `${safe(data.active.opener)} · ${data.active.hours}h open${data.active.overdue ? ' · Overdue' : ''}` : 'Ready when your team is'}<span aria-hidden="true">↗</span></span>
+    </button>
+    <button id="overview-exceptions" type="button" class="overview-action ${count ? 'needs-attention' : ''}" aria-label="${count} exceptions need attention">
+      <span class="action-label">${navigationIcon('exceptions')} Exceptions</span><strong>${count ? count + ' to check' : 'All clear'}</strong>
+      <span class="action-detail">${count ? 'All dates · Open the inbox' : 'All dates · No open issues'}<span aria-hidden="true">↗</span></span>
+    </button>
+    <button id="overview-money" type="button" class="overview-action" aria-label="Customer credit ${money(balance)}">
+      <span class="action-label">${navigationIcon('money')} Customer outstanding</span><strong>${money(balance)}</strong>
+      <span class="action-detail">All dates · View credit ledger<span aria-hidden="true">↗</span></span>
+    </button>
   </section>`;
 }
 
