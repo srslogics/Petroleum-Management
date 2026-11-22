@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 
 STATIC_FILES = {
     "/app.js": "text/javascript", "/styles.css": "text/css", "/daily-report.js": "text/javascript",
+    "/tuljai-logo.jpg": "image/jpeg",
 }
 
 
@@ -689,7 +690,10 @@ class Request:
                 return 200, b'{"ok":true}', json_type, None
             if path in STATIC_FILES:
                 body = (ROOT / "static" / path.lstrip("/")).read_bytes()
-                return 200, body, f"{STATIC_FILES[path]}; charset=utf-8", None
+                content_type = STATIC_FILES[path]
+                if content_type.startswith("text/"):
+                    content_type += "; charset=utf-8"
+                return 200, body, content_type, None
             if path in ("/", "/manager", "/owner"):
                 body = (ROOT / "static" / "index.html").read_bytes()
                 if not self.demo:

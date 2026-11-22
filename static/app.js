@@ -1,6 +1,9 @@
 "use strict";
 
 const root = document.querySelector("#app");
+const appName = "Tuljai Petroleum";
+const clientName = "Tuljai Realtors & Petroleum";
+const brandLogo = document.querySelector('meta[name="brand-logo"]')?.content || "/tuljai-logo.jpg";
 const role = { "/manager": "manager", "/owner": "owner" }[location.pathname];
 const fuelNames = ["Petrol", "Diesel"];
 const methodNames = { cash: "Cash", upi: "UPI", card: "Card", credit: "Credit" };
@@ -33,9 +36,9 @@ async function api(path, body) {
   try {
     response = await fetch("/api/" + role + path, options);
   } catch {
-    throw new Error("Could not reach Pump Ledger. Check your connection and try again.");
+    throw new Error(`Could not reach ${appName}. Check your connection and try again.`);
   }
-  const unavailable = "Pump Ledger is temporarily unavailable. Please try again in a moment.";
+  const unavailable = `${appName} is temporarily unavailable. Please try again in a moment.`;
   const contentType = response.headers.get("content-type") || "";
   if (!contentType.toLowerCase().startsWith("application/json")) {
     throw Object.assign(new Error(unavailable), { status: response.status });
@@ -66,7 +69,10 @@ function icon(name) {
 }
 
 function brand() {
-  return `<a class="brand" href="/"><span class="brand-mark">${icon("pump")}</span><span>Pump Ledger</span></a>`;
+  return `<a class="brand" href="/">
+    <img class="brand-logo" src="${safe(brandLogo)}" width="54" height="48" alt="">
+    <span class="brand-name">Tuljai<small>Realtors &amp; Petroleum</small></span>
+  </a>`;
 }
 
 function showLanding() {
@@ -630,7 +636,7 @@ async function initialize() {
     showLanding();
     return;
   }
-  document.title = roleTitle + " | Pump Ledger";
+  document.title = roleTitle + " | " + appName;
   try {
     await showHome();
   } catch (error) {

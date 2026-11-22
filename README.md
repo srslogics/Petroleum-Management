@@ -1,4 +1,4 @@
-# Petroleum Management
+# Tuljai Petroleum
 
 Phase 1 serves two web apps from one Python backend and Turso database on Render. Local development uses SQLite by default. The repository started with a README, so the first version uses Python's standard library with plain HTML, CSS and JavaScript. It needs Python 3.10+ and an installed time zone database with `Asia/Kolkata`. There is no build step.
 

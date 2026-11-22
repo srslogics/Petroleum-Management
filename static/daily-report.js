@@ -29,7 +29,9 @@ function showDailyReport(data) {
   const { payments, till, shifts } = data;
   const pending = shifts.filter(shift => !shift.reviewed_at).length;
   const hasNotes = shifts.some(shift => shift.expense_note || shift.review_note);
-  shell(`<div class="dashboard-heading">
+  shell(`<div class="report-client-print">
+    <img src="${safe(brandLogo)}" width="70" height="62" alt=""><strong>${safe(clientName)}</strong>
+  </div><div class="dashboard-heading">
     ${heading(businessDay(data.date), "Daily report", reportStation())}
     <div class="report-controls"><label class="date-control">Business date<input id="date" type="date" value="${safe(data.date)}"></label>
       <button id="print-day" class="secondary" type="button">Print</button>
@@ -125,7 +127,7 @@ function dailyCsv(data) {
   const m = value => value / 100;
   const l = value => value / 1000;
   const rows = [
-    ["Daily station report"], ["Station", session.station], ["Station code", session.station_code],
+    ["Daily station report"], ["Company", clientName], ["Station", session.station], ["Station code", session.station_code],
     ["Business date (IST)", data.date], [],
     ["Summary", "Value"], ["Submitted shifts", data.shifts.length],
     ["Awaiting review", data.shifts.filter(shift => !shift.reviewed_at).length],
@@ -170,7 +172,7 @@ function downloadDailyReport(data) {
   const url = URL.createObjectURL(new Blob([dailyCsv(data)], {type: "text/csv;charset=utf-8"}));
   const download = document.createElement("a");
   download.href = url;
-  download.download = "pump-ledger-daily-" + data.date + ".csv";
+  download.download = "tuljai-petroleum-daily-" + data.date + ".csv";
   document.body.append(download);
   download.click();
   download.remove();
