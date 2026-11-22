@@ -4,7 +4,7 @@ const root = document.querySelector("#app");
 const appName = "Tuljai Petroleum";
 const clientName = "Tuljai Realtors & Petroleum";
 const brandLogo = document.querySelector('meta[name="brand-logo"]')?.content || "/tuljai-logo.jpg";
-const role = { "/manager": "manager", "/owner": "owner" }[location.pathname];
+const role = { "/": "owner", "/manager": "manager", "/other": "manager", "/owner": "owner" }[location.pathname];
 const fuelNames = ["Petrol", "Diesel"];
 const methodNames = { cash: "Cash", upi: "UPI", card: "Card", credit: "Credit" };
 const rupees = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" });
@@ -69,33 +69,16 @@ function icon(name) {
 }
 
 function brand() {
-  return `<a class="brand" href="/">
+  return `<a class="brand" href="/${role || "owner"}">
     <img class="brand-logo" src="${safe(brandLogo)}" width="54" height="48" alt="">
     <span class="brand-name">Tuljai<small>Realtors &amp; Petroleum</small></span>
   </a>`;
 }
 
-function showLanding() {
-  root.innerHTML = `<div class="entry">
-    <header class="entry-header">${brand()}</header>
-    <main class="welcome">
-      <h1>Station operations</h1><p>Choose a workspace to continue.</p>
-      <div class="portal-grid">
-        <a class="portal" href="/owner"><span class="portal-icon">${icon("dashboard")}</span>
-          <h2>Owner App</h2><p>Review submitted shifts, daily sales and fuel stock.</p><span class="portal-action">Open owner app ${icon("arrow")}</span>
-        </a>
-        <a class="portal" href="/manager"><span class="portal-icon">${icon("receipt")}</span>
-          <h2>Station Manager App</h2><p>Open a shift, record fuel sales and reconcile the till.</p><span class="portal-action">Open manager app ${icon("arrow")}</span>
-        </a>
-      </div>
-    </main>
-  </div>`;
-}
-
 function showLogin(message = "") {
   const demoMode = document.querySelector('meta[name="demo-mode"]');
   root.innerHTML = `<div class="entry">
-    <header class="entry-header">${brand()}<a href="/${role === "owner" ? "manager" : "owner"}">Open ${role === "owner" ? "manager" : "owner"} app ${icon("arrow")}</a></header>
+    <header class="entry-header">${brand()}</header>
     <main class="login card">
       <p class="eyebrow">${roleTitle}</p><h1>Sign in</h1>
       <form id="login">
@@ -640,10 +623,6 @@ function showSettings(setup, canEditStock, confirmation = "") {
 }
 
 async function initialize() {
-  if (!role) {
-    showLanding();
-    return;
-  }
   document.title = roleTitle + " | " + appName;
   try {
     await showHome();

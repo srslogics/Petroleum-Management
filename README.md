@@ -102,3 +102,7 @@ An installed app requires internet access for sign-in, reports and saving operat
 ## Social link previews
 
 The home, owner and manager URLs serve Open Graph and social card metadata directly in their HTML, with the Tuljai logo as the preview image. On Render the public URL is read from `RENDER_EXTERNAL_URL`. Set `PUBLIC_APP_URL` to your HTTPS origin if you use a custom domain. Social platforms control when they refresh previously shared link previews.
+
+## Direct app links
+
+Share `/owner` with the owner and `/manager` with station managers. `/other` is an alias for the Station Manager App. The root URL opens the Owner App. Each sign-in screen stays within its role.

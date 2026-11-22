@@ -23,7 +23,7 @@ self.addEventListener("fetch", event => {
 
   // Authenticated pages always come from the server. Only the public
   // offline screen and installation icons are stored by this worker.
-  if (request.mode === "navigate" && ["/", "/owner", "/manager"].includes(url.pathname)) {
+  if (request.mode === "navigate" && ["/", "/owner", "/manager", "/other"].includes(url.pathname)) {
     event.respondWith(fetch(request).catch(async () => {
       const fallback = await caches.match(OFFLINE_PAGE);
       return fallback || Response.error();
