@@ -55,14 +55,8 @@ async function api(path, body) {
 const glyphs = {
   pump: '<path d="M4 20V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v15M3 20h12M7 7h4v4H7zM14 13h2a2 2 0 0 1 2 2v2a1.5 1.5 0 0 0 3 0V9l-3-3"/>',
   dashboard: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
-  settings: '<path d="M4 6h7m4 0h5M4 12h3m4 0h9M4 18h10m4 0h2"/><circle cx="13" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>',
-  team: '<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M16 5a3 3 0 0 1 0 6m2 3a4 4 0 0 1 3 4v2"/>',
-  logout: '<path d="M10 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5m4-12 4 4-4 4m4-4H9"/>',
   arrow: '<path d="M4 12h15m-6-6 6 6-6 6"/>',
-  sales: '<path d="M5 18V7m0 11h15M9 14l4-4 3 2 4-5m-4 0h4v4"/>',
-  volume: '<path d="M12 3c-2 3-6 7-6 11a6 6 0 0 0 12 0c0-4-4-8-6-11z"/>',
   receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3zm3 5h6m-6 4h6m-6 4h3"/>',
-  review: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8 12 3 3 5-6"/>',
   warning: '<path d="M12 3 2.8 19h18.4L12 3zm0 6v4m0 3h.01"/>',
 };
 
@@ -137,29 +131,23 @@ function showLogin(message = "") {
 
 function shell(content, view = "home") {
   const navigation = role === "owner"
-    ? [["home", "Overview", "dashboard"], ["daily-report", "Daily report", "receipt"], ["settings", "Station settings", "settings"], ["team", "Team", "team"]]
-    : [["home", "Shift operations", "receipt"]];
+    ? [["home", "Overview"], ["daily-report", "Daily report"], ["settings", "Settings"], ["team", "Team"]]
+    : [["home", "Shift operations"]];
   const shouldFocus = document.activeElement && document.activeElement !== document.body;
-  const initials = session.name.split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join("").toUpperCase();
   root.innerHTML = `<a class="skip-link" href="#main-content">Skip to main content</a>
-    <div class="workspace">
-      <aside class="sidebar" aria-label="Workspace">
+    <header class="workspace-header">
+      <div class="header-inner">
         ${brand()}
-        <p class="workspace-label">${roleTitle}</p>
-        <nav class="app-nav" aria-label="App navigation">${navigation.map(([id, label, glyph]) =>
-          `<button class="nav-button" id="${id}" type="button" ${view === id ? 'aria-current="page"' : ""}>${icon(glyph)}<span>${label}</span></button>`
-        ).join("")}</nav>
-      </aside>
-      <div class="workspace-body">
-        <header class="topbar">
-          <div class="topbar-station"><span class="station-dot" aria-hidden="true"></span><strong>${safe(session.station)}</strong><small>${safe(session.station_code)}</small></div>
-          <div class="account"><span class="account-avatar" aria-hidden="true">${safe(initials)}</span><span class="account-name">${safe(session.name)}</span>
-            <button id="logout" class="sign-out" type="button">${icon("logout")}<span>Sign out</span></button>
-          </div>
-        </header>
-        <main id="main-content" tabindex="-1" class="page"><p id="notice" role="alert" class="notice" hidden></p>${content}</main>
+        <div class="header-station"><strong>${safe(session.station)}</strong><small>${safe(session.station_code)}</small></div>
+        <div class="account"><span class="account-name">${safe(session.name)}</span>
+          <button id="logout" class="sign-out" type="button">Sign out</button>
+        </div>
       </div>
-    </div>`;
+      <nav class="app-nav" aria-label="${roleTitle} navigation">${navigation.map(([id, label]) =>
+        `<button class="nav-button" id="${id}" type="button" ${view === id ? 'aria-current="page"' : ""}>${label}</button>`
+      ).join("")}</nav>
+    </header>
+    <main id="main-content" tabindex="-1" class="page"><p id="notice" role="alert" class="notice" hidden></p>${content}</main>`;
   if (shouldFocus) root.querySelector("main h1")?.focus({ preventScroll: true });
   window.scrollTo(0, 0);
   listen("logout", async () => {
@@ -411,10 +399,9 @@ function updatePreview(form, active) {
   showMetric("variance", counted === null || expected === null ? null : counted - expected, true);
 }
 
-function dashboardMetric(label, value, detail, glyph, color) {
-  return `<div class="summary-card ${color}"><div class="summary-top"><span>${label}</span>
-    <span class="summary-icon">${icon(glyph)}</span></div>
-    <strong>${value}</strong><small>${detail}</small></div>`;
+function ledgerSummary(items) {
+  return `<dl class="ledger-summary">${items.map(([label, value]) =>
+    `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("")}</dl>`;
 }
 
 function reviewStatus(shift) {
@@ -449,36 +436,29 @@ function showOwner(data) {
   const pending = data.shifts.filter(shift => !shift.reviewed_at).length;
   const missingRates = fuelNames.some(fuel => !data.setup.fuels[fuel].rate);
   shell(`<div class="dashboard-heading">
-    ${heading(businessDay(data.date), "Daily dashboard", "Review fuel sales, stock and shift reconciliations.")}
+    ${heading(businessDay(data.date), "Station overview")}
     <div class="report-controls"><label class="date-control">Business date<input id="date" type="date" value="${safe(data.date)}"></label>
       <button id="open-daily-report" class="secondary" type="button">Open daily report ${icon("arrow")}</button></div>
   </div>
   ${missingRates ? `<div class="setup-notice"><span class="setup-icon">${icon("warning")}</span>
     <div><strong>Set fuel prices to start selling</strong><p>Enter the Petrol and Diesel rates before a manager opens a shift.</p></div>
     <button id="setup-rates" class="secondary" type="button">Set fuel rates ${icon("arrow")}</button></div>` : ""}
-  <section class="summary-grid" aria-label="Daily totals">
-    ${dashboardMetric("Total fuel sales", money(totalSales), "Petrol and Diesel", "sales", "summary-featured")}
-    ${dashboardMetric("Fuel volume sold", volume(totalVolume), "Across all nozzles", "volume", "summary-blue")}
-    ${dashboardMetric("Submitted shifts", data.shifts.length, "For this business date", "receipt", "summary-green")}
-    ${dashboardMetric("Awaiting review", pending, pending ? "Shifts to reconcile" : "No pending reviews", "review", "summary-amber")}
-  </section>
-  <div class="dashboard-grid">
-    <section class="card">
-      <header class="section-head"><div><h2>Sales by fuel</h2><p>Totals from submitted shifts on the selected date.</p></div>
-        <span class="panel-icon">${icon("sales")}</span></header>
-      <div class="fuel-split">${fuelNames.map(fuel => {
-        const item = data.daily[fuel];
-        const share = totalVolume > 0 ? Math.round(100 * item.litres / totalVolume) : 0;
-        return `<div class="fuel-split-row">
-          <div class="fuel-line"><div>${fuelTag(fuel)}<small>${volume(item.litres)} sold</small></div>
-            <strong>${money(item.sales)}</strong></div>
-          <progress class="volume-share ${fuel.toLowerCase()}" max="100" value="${share}" aria-label="${fuel} share of litres sold"></progress>
-        </div>`;
-      }).join("")}</div>
+  <div class="ledger-sheet">
+    ${ledgerSummary([
+      ["Metered sales", money(totalSales)], ["Volume sold", volume(totalVolume)],
+      ["Submitted shifts", data.shifts.length], ["Awaiting review", pending],
+    ])}
+    <div class="ledger-columns">
+    <section class="ledger-section">
+      <header class="section-head"><h2>Sales by fuel</h2></header>
+      <table class="fuel-ledger">
+        <thead><tr><th scope="col">Fuel</th><th scope="col">Litres sold</th><th scope="col">Metered sales</th></tr></thead>
+        <tbody>${fuelNames.map(fuel => `<tr><th scope="row">${fuel}</th>
+          <td>${volume(data.daily[fuel].litres)}</td><td>${money(data.daily[fuel].sales)}</td></tr>`).join("")}</tbody>
+      </table>
     </section>
-    <section class="card">
-      <header class="section-head"><div><h2>Fuel stock</h2><p>Station balance through the latest submitted shift.</p></div>
-        <span class="panel-icon">${icon("pump")}</span></header>
+    <section class="ledger-section">
+      <header class="section-head"><div><h2>Fuel stock</h2><p>Balance through the latest submitted shift</p></div></header>
       <div class="stock-list">${fuelNames.map(fuel => {
         const item = data.stock[fuel];
         return `<details class="stock-detail">
@@ -495,9 +475,8 @@ function showOwner(data) {
       }).join("")}</div>
     </section>
   </div>
-  <section class="card shifts-card">
-    <header class="section-head"><div><h2 id="shift-heading">Submitted shifts</h2><p>Open a shift to review meter readings and collections.</p></div>
-      <span class="count">${data.shifts.length} submitted</span></header>
+  <section class="ledger-section">
+    <header class="section-head"><h2 id="shift-heading">Submitted shifts</h2></header>
     ${data.shifts.length ? `<div class="table-scroll" role="region" aria-labelledby="shift-heading" tabindex="0">
       <table class="shift-table">
         <thead><tr><th scope="col">Shift / submitted by</th><th scope="col">Submitted at</th><th scope="col" class="numeric">Metered sales</th>
@@ -509,9 +488,8 @@ function showOwner(data) {
           <td>${reviewStatus(shift)}</td>
           <td><button class="row-action" id="shift-${shift.id}" type="button" aria-label="Open shift ${shift.id} report">${icon("arrow")}</button></td>
         </tr>`).join("")}</tbody>
-      </table></div>` : `<div class="empty-state"><span class="empty-icon">${icon("receipt")}</span>
-        <strong>No shifts submitted</strong><p>Completed shifts for this business date will appear here.</p></div>`}
-  </section>`);
+      </table></div>` : '<p class="ledger-empty">No shifts submitted for this business date.</p>'}
+  </section></div>`);
   if (missingRates) listen("setup-rates", openSettings);
   bindDateFilter("/dashboard", showOwner);
   listen("open-daily-report", openDailyReport);
