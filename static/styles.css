@@ -356,3 +356,13 @@ input, select, textarea { scroll-margin-block: 1rem; }
 @media print {
   .install-bar, .connection-banner, dialog { display: none !important; }
 }
+
+.manager-entry { min-width: 0; margin: .8rem 0 0; border: 1px solid var(--line); border-radius: .5rem; padding: .8rem; }
+.manager-entry legend { font-weight: 650; font-size: .85rem; padding-inline: .3rem; }
+.entry-section .section-head { flex-wrap: wrap; }
+.recorded-entries { display: grid; gap: .6rem; margin-top: .65rem; }
+.recorded-entries > div { border-top: 1px solid var(--line); padding-top: .65rem; font-size: .88rem; }
+.recorded-entries p { color: var(--muted); margin-top: .2rem; }
+.day-entry-group { margin-top: 1rem; }
+.day-entry-group > h3 { font-size: .95rem; }
+.day-entry-group .card { margin-top: .6rem; box-shadow: none; }

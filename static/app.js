@@ -299,14 +299,18 @@ function showClosing(active) {
               ${numberField("Physical stock (L)", "physical_" + fuel, { step: "0.001", placeholder: "Optional" })}
             </div>`).join("")}</div>
           </section>
+          ${entrySection("deliveries", "Fuel delivery entries", "Record each delivery with its supplier and challan. Entries calculate the delivery totals above.")}
+          ${entrySection("payments", "Payment entries", "Add transactions or settlement batches. Entries calculate the total for that payment method below. Credit entries require a customer name.")}
+          ${entrySection("expenses", "Till expense entries", "Record each expense paid from the till. Entries calculate the expense total below.")}
           <section class="card">
-            <header class="section-head"><div><h2>Collections and till</h2><p>Enter the amount recorded for each payment method.</p></div></header>
+            <header class="section-head"><div><h2>Collections and till</h2><p>Enter totals directly or add detailed entries above. Totals with entries are calculated automatically.</p></div></header>
             <div class="field-grid">
               ${Object.entries(methodNames).map(([key, label]) => numberField(label + " (₹)", key)).join("")}
               ${numberField("Till expenses (₹)", "expenses")}
               ${numberField("Actual cash counted (₹)", "counted", { required: true })}
             </div>
             <label>Expense note <span class="quiet">(optional)</span><textarea name="expense_note" maxlength="250" rows="2"></textarea></label>
+            <label>Shift notes / handover<textarea name="shift_note" maxlength="1000" rows="3" placeholder="Equipment issues, delivery concerns or handover instructions"></textarea></label>
           </section>
         </div>
         <aside class="card reconciliation">
@@ -336,10 +340,11 @@ function showClosing(active) {
       deliveries: byFuel("delivery_"), physical: byFuel("physical_"),
       collections: Object.fromEntries(Object.keys(methodNames).map(key => [key, values[key]])),
       expenses: values.expenses, counted: values.counted, expense_note: values.expense_note,
+      entries: collectEntries(form), shift_note: values.shift_note,
     });
     await showHome();
   });
-  form.addEventListener("input", () => updatePreview(form, active));
+  bindManagerEntries(form, active);
   updatePreview(form, active);
 }
 
@@ -531,6 +536,7 @@ function showReport(shift, source = "home") {
           </div>`;
         }).join("")}</div>
       </section>
+      ${recordedEntries(shift.entries, shift.shift_note)}
       <section class="card"><h2>Owner review</h2>
         ${shift.review ? `<p><span class="status reviewed">Reviewed</span> ${safe(shift.review.reviewer)} · ${timestamp(shift.review.reviewed_at)}</p>
           ${shift.review.review_note ? `<p class="review-note">${safe(shift.review.review_note)}</p>` : ""}`

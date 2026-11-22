@@ -106,3 +106,9 @@ The home, owner and manager URLs serve Open Graph and social card metadata direc
 ## Direct app links
 
 Share `/owner` with the owner and `/manager` with station managers. The root URL opens the Owner App. Each sign-in screen stays within its role.
+
+## Manager shift entries
+
+In an open shift, the manager can add payment transactions or settlement batches, individual fuel deliveries, and till expenses. Payment entries include method, amount, customer/account, reference and notes. Credit requires a customer name. Deliveries include fuel, litres, supplier/tanker and invoice/challan reference. Expenses include amount, payee, reference and description. Physical stock measurements and handover notes are entered at closing.
+
+If detailed entries exist for a payment method or fuel, the server derives that total from those entries. Otherwise the direct total is used. Enter all entries for a method when using that detail list. Expense entries replace the direct expense total. All submitted entries and handover notes appear in the owner's shift report, daily report and CSV export. Closing form entries are saved on submission.

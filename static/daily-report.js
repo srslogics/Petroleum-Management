@@ -105,6 +105,9 @@ function showDailyReport(data) {
       data.nozzles.map(row => [safe(row.code), fuelTag(row.fuel), volume(row.opening), volume(row.closing), volume(row.litres)]))
       : '<p class="quiet">No submitted meter readings for this date.</p>'}
   </section>
+  ${shifts.some(shift => shift.shift_note || Object.values(shift.entries || {}).some(rows => rows.length)) ?
+    `<section class="ledger-section"><h2>Manager entries by shift</h2>${shifts.map(shift =>
+      `<div class="day-entry-group"><h3>Shift #${shift.id}</h3>${recordedEntries(shift.entries, shift.shift_note)}</div>`).join("")}</section>` : ""}
   ${hasNotes ? `<section class="ledger-section"><h2>Shift notes</h2><div class="daily-notes">
     ${shifts.filter(shift => shift.expense_note || shift.review_note).map(shift => `<div>
       <strong>Shift #${shift.id}</strong>
@@ -160,6 +163,15 @@ function dailyCsv(data) {
     ["Nozzle", "Fuel", "Opening (L)", "Closing (L)", "Sold (L)"],
     ...data.nozzles.map(nozzle => [nozzle.code, nozzle.fuel, l(nozzle.opening), l(nozzle.closing), l(nozzle.litres)]),
   ];
+  rows.push([], ["Shift", "Entry type", "Method / fuel", "Amount (INR)", "Quantity (L)", "Customer / supplier / payee", "Reference", "Description"]);
+  for (const shift of data.shifts) {
+    for (const [category, entries] of Object.entries(shift.entries || {})) {
+      for (const entry of entries) rows.push([shift.id, category, entry.method || entry.fuel || "",
+        entry.amount === undefined ? "" : m(entry.amount), entry.quantity === undefined ? "" : l(entry.quantity),
+        entry.party, entry.reference, entry.note]);
+    }
+    if (shift.shift_note) rows.push([shift.id, "Shift note", "", "", "", "", "", shift.shift_note]);
+  }
   return "\ufeff" + rows.map(row => row.map(cell => {
     let value = String(cell ?? "");
     // Spreadsheet apps can interpret operator-prefixed text as formulas.

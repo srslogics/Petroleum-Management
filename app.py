@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 STATIC_FILES = {
     "/app.js": "text/javascript", "/styles.css": "text/css", "/daily-report.js": "text/javascript",
     "/tuljai-logo.jpg": "image/jpeg",
+    "/manager-entries.js": "text/javascript",
     "/pwa.js": "text/javascript", "/sw.js": "text/javascript", "/offline.html": "text/html",
     "/offline.css": "text/css", "/owner.webmanifest": "application/manifest+json",
     "/manager.webmanifest": "application/manifest+json",
@@ -315,6 +316,40 @@ def report(db, sid, shift_id):
             "submitted_at": row["submitted_at"], "submitter": row["submitter"], "review": review}
 
 
+def shift_entries(body):
+    entries = {}
+    for category in ("payments", "deliveries", "expenses"):
+        rows = body.get("entries", {}).get(category, [])
+        if not isinstance(rows, list) or len(rows) > 100:
+            fail("Enter up to 100 entries in each section.")
+        entries[category] = []
+        for row in rows:
+            row = mapping(row, "entry")
+            fields = ("party", "reference", "note")
+            parsed = {field: note(row.get(field, ""), field, 150) for field in fields}
+            if category == "deliveries":
+                if row.get("fuel") not in FUELS:
+                    fail("Choose Petrol or Diesel for the delivery.")
+                parsed["fuel"] = row["fuel"]
+                parsed["quantity"] = number(row.get("quantity"), 3, "delivery litres")
+                if parsed["quantity"] == 0:
+                    fail("Delivery litres must be greater than zero.")
+            else:
+                parsed["amount"] = number(row.get("amount"), 2, "entry amount")
+                if parsed["amount"] == 0:
+                    fail("Entry amount must be greater than zero.")
+                if category == "payments":
+                    if row.get("method") not in METHODS:
+                        fail("Choose a valid payment method.")
+                    parsed["method"] = row["method"]
+                    if parsed["method"] == "credit" and not parsed["party"]:
+                        fail("Enter a customer name for credit sales.")
+                elif not parsed["note"]:
+                    fail("Describe the till expense.")
+            entries[category].append(parsed)
+    return entries
+
+
 def submit_shift(db, user, shift_id, body):
     sid = user["station_id"]
     with transaction(db, immediate=True):
@@ -323,6 +358,8 @@ def submit_shift(db, user, shift_id, body):
             fail("Shift not found.", 404)
         if row["submitted_at"]:
             fail("This shift has already been submitted.", 409)
+        mapping(body.get("entries", {}), "shift entries")
+        entries = shift_entries(body)
         draft = json.loads(row["opening_json"])
         closings = mapping(body.get("closings"), "closing readings")
         collections_input = mapping(body.get("collections"), "collections")
@@ -348,6 +385,16 @@ def submit_shift(db, user, shift_id, body):
         collections = {method: number(collections_input.get(method), 2, f"{method} collection", optional=True) or 0
                        for method in METHODS}
         expenses = number(body.get("expenses"), 2, "till expenses", optional=True) or 0
+        for method in METHODS:
+            recorded = [entry for entry in entries["payments"] if entry["method"] == method]
+            if recorded:
+                collections[method] = sum(entry["amount"] for entry in recorded)
+        for fuel in FUELS:
+            delivered = [entry for entry in entries["deliveries"] if entry["fuel"] == fuel]
+            if delivered:
+                fuels[fuel]["delivery"] = sum(entry["quantity"] for entry in delivered)
+        if entries["expenses"]:
+            expenses = sum(entry["amount"] for entry in entries["expenses"])
         counted = number(body.get("counted"), 2, "actual cash counted")
         expected = collections["cash"] - expenses
         sales = sum(item["sales"] for item in fuels.values())
@@ -358,6 +405,7 @@ def submit_shift(db, user, shift_id, body):
             "cash_difference": counted - expected, "sales": sales,
             "collection_total": collection_total, "collection_difference": collection_total - sales,
             "expense_note": note(body.get("expense_note", ""), "an expense note"),
+            "shift_note": note(body.get("shift_note", ""), "shift notes", 1000), "entries": entries,
         }
         db.execute("""UPDATE shifts SET submitted_at = ?, submitted_by = ?, report_json = ? WHERE id = ?""",
                    (now(), user["id"], json.dumps(payload), shift_id))
@@ -474,7 +522,8 @@ def daily_owner_report(db, sid, selected):
         fields = ("id", "opened_at", "submitted_at", "submitter", "reviewed_at", "review_note", "reviewer")
         shifts.append({key: row[key] for key in fields} | {
             key: payload[key] for key in ("expenses", "cash_difference", "sales", "collection_difference", "expense_note")
-        } | {"payments": {method: payload["collections"].get(method, 0) for method in METHODS}})
+        } | {"payments": {method: payload["collections"].get(method, 0) for method in METHODS},
+             "entries": payload.get("entries", {}), "shift_note": payload.get("shift_note", "")})
     sales = sum(fuel["sales"] for fuel in fuels.values())
     accounted = sum(payments.values())
     return {

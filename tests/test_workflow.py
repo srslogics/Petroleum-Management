@@ -136,6 +136,35 @@ class WorkflowTest(unittest.TestCase):
             self.assertNotIn("__PAGE_", page)
             self.assertNotIn("password_hash", page)
 
+    def test_manager_entries_are_saved_and_visible_to_owner(self):
+        self.login()
+        active = self.expect(200, "/api/manager/shift", {"openings": {"1": 100, "2": 200}})
+        entries = {
+            "payments": [
+                {"method": "upi", "amount": "100", "reference": "UTR-TEST", "party": "Customer"},
+                {"method": "upi", "amount": "50"},
+                {"method": "credit", "amount": "25", "party": "Fleet account"},
+            ],
+            "deliveries": [{"fuel": "Petrol", "quantity": "200", "party": "Demo supplier", "reference": "CH-01"}],
+            "expenses": [{"amount": "10", "party": "Cleaner", "note": "Cleaning"}],
+        }
+        closing = {"closings": {"1": 110, "2": 210}, "collections": {"cash": "1000", "upi": "999"},
+                   "expenses": "999", "counted": "990", "entries": entries, "shift_note": "Check nozzle hose"}
+        invalid = dict(closing, entries={**entries, "payments": [{"method": "credit", "amount": "25"}]})
+        self.expect(400, f"/api/manager/shifts/{active['id']}/submit", invalid)
+        self.expect(200, f"/api/manager/shifts/{active['id']}/submit", closing)
+        report = self.expect(200, f"/api/owner/shifts/{active['id']}")
+        self.assertEqual(report["collections"]["upi"], 15000)
+        self.assertEqual(report["collections"]["credit"], 2500)
+        self.assertEqual(report["expenses"], 1000)
+        self.assertEqual(report["expected"], 99000)
+        self.assertEqual(report["fuels"]["Petrol"]["delivery"], 200000)
+        self.assertEqual(report["entries"]["payments"][0]["reference"], "UTR-TEST")
+        daily = self.expect(200, "/api/owner/daily-report?date=2026-11-22")
+        self.assertEqual(daily["shifts"][0]["shift_note"], "Check nozzle hose")
+        self.assertEqual(daily["shifts"][0]["entries"], report["entries"])
+        self.expect(409, f"/api/manager/shifts/{active['id']}/submit", closing)
+
     def test_two_consecutive_shifts(self):
         self.assertIn(b"Tuljai Petroleum", self.expect(200, "/manager"))
         self.assertIn(b"Tuljai Petroleum", self.expect(200, "/owner"))
