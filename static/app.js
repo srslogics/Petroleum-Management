@@ -52,22 +52,40 @@ async function api(path, body) {
   return payload;
 }
 
+const glyphs = {
+  pump: '<path d="M4 20V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v15M3 20h12M7 7h4v4H7zM14 13h2a2 2 0 0 1 2 2v2a1.5 1.5 0 0 0 3 0V9l-3-3"/>',
+  dashboard: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  settings: '<path d="M4 6h7m4 0h5M4 12h3m4 0h9M4 18h10m4 0h2"/><circle cx="13" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>',
+  team: '<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M16 5a3 3 0 0 1 0 6m2 3a4 4 0 0 1 3 4v2"/>',
+  logout: '<path d="M10 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5m4-12 4 4-4 4m4-4H9"/>',
+  arrow: '<path d="M4 12h15m-6-6 6 6-6 6"/>',
+  sales: '<path d="M5 18V7m0 11h15M9 14l4-4 3 2 4-5m-4 0h4v4"/>',
+  volume: '<path d="M12 3c-2 3-6 7-6 11a6 6 0 0 0 12 0c0-4-4-8-6-11z"/>',
+  receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3zm3 5h6m-6 4h6m-6 4h3"/>',
+  review: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8 12 3 3 5-6"/>',
+  warning: '<path d="M12 3 2.8 19h18.4L12 3zm0 6v4m0 3h.01"/>',
+};
+
+function icon(name) {
+  return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${glyphs[name]}</svg>`;
+}
+
 function brand() {
-  return '<a class="brand" href="/"><span class="brand-mark" aria-hidden="true">PL</span> Pump Ledger</a>';
+  return `<a class="brand" href="/"><span class="brand-mark">${icon("pump")}</span><span>Pump Ledger</span></a>`;
 }
 
 function showLanding() {
   root.innerHTML = `<div class="entry">
     <header class="entry-header">${brand()}</header>
     <main class="welcome">
-      <p class="eyebrow">Station operations</p>
-      <h1>Petrol pump management</h1>
+      <h1>Station operations</h1><p>Choose a workspace to continue.</p>
       <div class="portal-grid">
-        <a class="portal" href="/manager"><span class="portal-icon" aria-hidden="true">↗</span>
-          <h2>Station Manager App</h2><p>Open a shift, record fuel sales and reconcile the till.</p><span class="portal-action">Open manager app →</span>
+        <a class="portal" href="/owner"><span class="portal-icon">${icon("dashboard")}</span>
+          <h2>Owner App</h2><p>Review submitted shifts, daily sales and fuel stock.</p><span class="portal-action">Open owner app ${icon("arrow")}</span>
         </a>
-        <a class="portal" href="/owner"><span class="portal-icon" aria-hidden="true">↗</span>
-          <h2>Owner App</h2><p>Review submitted shifts, daily sales and fuel stock.</p><span class="portal-action">Open owner app →</span>
+        <a class="portal" href="/manager"><span class="portal-icon">${icon("receipt")}</span>
+          <h2>Station Manager App</h2><p>Open a shift, record fuel sales and reconcile the till.</p><span class="portal-action">Open manager app ${icon("arrow")}</span>
         </a>
       </div>
     </main>
@@ -77,24 +95,38 @@ function showLanding() {
 function showLogin(message = "") {
   const demoMode = document.querySelector('meta[name="demo-mode"]');
   root.innerHTML = `<div class="entry">
-    <header class="entry-header">${brand()}<a href="/${role === "owner" ? "manager" : "owner"}">Switch app ↗</a></header>
+    <header class="entry-header">${brand()}<a href="/${role === "owner" ? "manager" : "owner"}">Open ${role === "owner" ? "manager" : "owner"} app ${icon("arrow")}</a></header>
     <main class="login card">
       <p class="eyebrow">${roleTitle}</p><h1>Sign in</h1>
       <form id="login">
         <label>Mobile number or email<input required name="identifier" autocomplete="username" autocapitalize="none" maxlength="254"></label>
-        <label>Password<input required name="password" type="password" autocomplete="current-password"></label>
+        <div class="password-entry">
+          <label for="password">Password</label>
+          <div class="password-input">
+            <input id="password" required name="password" type="password" autocomplete="current-password">
+            <button id="password-toggle" class="password-toggle" type="button" aria-controls="password">Show password</button>
+          </div>
+        </div>
         <div class="form-error" role="alert">${safe(message)}</div>
-        <button class="primary">Sign in</button>
+        <button class="primary">Sign in ${icon("arrow")}</button>
       </form>
       ${demoMode ? '<button id="demo" type="button" class="text-button">Fill demo sign-in</button>' : ""}
     </main>
   </div>`;
   const login = document.querySelector("#login");
+  if (message) login.elements.identifier.focus();
+  const toggle = document.querySelector("#password-toggle");
+  toggle.addEventListener("click", () => {
+    const password = login.elements.password;
+    const show = password.type === "password";
+    password.type = show ? "text" : "password";
+    toggle.textContent = show ? "Hide password" : "Show password";
+  });
   const demoButton = document.querySelector("#demo");
   demoButton?.addEventListener("click", () => {
     login.elements.identifier.value = role + "@demo.local";
     login.elements.password.value = role === "owner" ? "OwnerDemo123!" : "ManagerDemo123!";
-    login.querySelector("button").focus();
+    login.querySelector(".primary").focus();
   });
   bindForm("login", async form => {
     await api("/login", fields(form));
@@ -103,28 +135,45 @@ function showLogin(message = "") {
   }, false);
 }
 
-function shell(content) {
-  const ownerNav = role === "owner"
-    ? '<button class="nav-button" id="home" type="button">Dashboard</button><button class="nav-button" id="settings" type="button">Settings</button><button class="nav-button" id="team" type="button">Team</button>'
-    : '<span class="nav-label">Shift closing</span>';
-  root.innerHTML = `<header class="top"><div class="top-inner">${brand()}
-    <span class="app-name">${roleTitle}</span>
-    <div class="account"><span>${safe(session.name)}</span><button id="logout" class="nav-button" type="button">Sign out</button></div>
-  </div></header>
-  <div class="subnav"><div class="subnav-inner">
-    <div class="station"><span class="station-dot" aria-hidden="true"></span>${safe(session.station)} <small>${safe(session.station_code)}</small></div>
-    <nav aria-label="App navigation">${ownerNav}</nav>
-  </div></div>
-  <main class="page"><p id="notice" role="alert" class="notice" hidden></p>${content}</main>`;
+function shell(content, view = "home") {
+  const navigation = role === "owner"
+    ? [["home", "Overview", "dashboard"], ["settings", "Station settings", "settings"], ["team", "Team", "team"]]
+    : [["home", "Shift operations", "receipt"]];
+  const shouldFocus = document.activeElement && document.activeElement !== document.body;
+  const initials = session.name.split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join("").toUpperCase();
+  root.innerHTML = `<a class="skip-link" href="#main-content">Skip to main content</a>
+    <div class="workspace">
+      <aside class="sidebar" aria-label="Workspace">
+        ${brand()}
+        <p class="workspace-label">${roleTitle}</p>
+        <nav class="app-nav" aria-label="App navigation">${navigation.map(([id, label, glyph]) =>
+          `<button class="nav-button" id="${id}" type="button" ${view === id ? 'aria-current="page"' : ""}>${icon(glyph)}<span>${label}</span></button>`
+        ).join("")}</nav>
+      </aside>
+      <div class="workspace-body">
+        <header class="topbar">
+          <div class="topbar-station"><span class="station-dot" aria-hidden="true"></span><strong>${safe(session.station)}</strong><small>${safe(session.station_code)}</small></div>
+          <div class="account"><span class="account-avatar" aria-hidden="true">${safe(initials)}</span><span class="account-name">${safe(session.name)}</span>
+            <button id="logout" class="sign-out" type="button">${icon("logout")}<span>Sign out</span></button>
+          </div>
+        </header>
+        <main id="main-content" tabindex="-1" class="page"><p id="notice" role="alert" class="notice" hidden></p>${content}</main>
+      </div>
+    </div>`;
+  if (shouldFocus) root.querySelector("main h1")?.focus({ preventScroll: true });
+  window.scrollTo(0, 0);
   listen("logout", async () => {
     await api("/logout", {});
     session = null;
     selectedDate = undefined;
     lastSubmission = undefined;
     showLogin();
+    document.querySelector("#login").elements.identifier.focus();
+  });
+  listen("home", role === "owner" ? showHome : () => {
+    root.querySelector("main h1")?.focus();
   });
   if (role === "owner") {
-    listen("home", showHome);
     listen("settings", openSettings);
     listen("team", openTeam);
   }
@@ -140,8 +189,10 @@ function listen(id, action, event = "click") {
         return;
       }
       const notice = document.querySelector("#notice");
-      notice.hidden = false;
-      notice.textContent = error.message;
+      if (notice) {
+        notice.hidden = false;
+        notice.textContent = error.message;
+      }
     }
   });
 }
@@ -150,9 +201,13 @@ function bindForm(id, onSubmit, expire = true) {
   const form = document.getElementById(id);
   form.addEventListener("submit", async event => {
     event.preventDefault();
-    const button = event.submitter || form.querySelector("button");
+    const button = event.submitter || form.querySelector('button:not([type="button"])');
     const errorbox = form.querySelector(".form-error");
+    if (button.disabled) return;
+    const label = button.innerHTML;
     button.disabled = true;
+    button.textContent = "Working…";
+    form.setAttribute("aria-busy", "true");
     errorbox.textContent = "";
     try {
       await onSubmit(form);
@@ -164,6 +219,8 @@ function bindForm(id, onSubmit, expire = true) {
       errorbox.textContent = error.message;
     } finally {
       button.disabled = false;
+      button.innerHTML = label;
+      form.removeAttribute("aria-busy");
     }
   });
   return form;
@@ -183,7 +240,7 @@ function numberField(label, name, options = {}) {
 }
 
 function heading(eyebrow, title, description = "") {
-  return `<div class="page-heading"><p class="eyebrow">${safe(eyebrow)}</p><h1>${safe(title)}</h1>
+  return `<div class="page-heading">${eyebrow ? `<p class="eyebrow">${safe(eyebrow)}</p>` : ""}<h1 tabindex="-1">${safe(title)}</h1>
     ${description ? `<p>${safe(description)}</p>` : ""}</div>`;
 }
 
@@ -205,9 +262,10 @@ function showManager(state) {
     return;
   }
   const setup = state.setup;
+  const missingRates = fuelNames.some(fuel => !setup.fuels[fuel].rate);
   shell(`${heading("Station operations", "Open a shift", "Confirm the opening meter readings before starting operations.")}
     ${lastSubmission ? `<div class="success" role="status">Shift #${lastSubmission.id} submitted by ${safe(lastSubmission.submitter)}.</div>` : ""}
-    <form id="open-shift">
+    <form id="open-shift" class="work-grid">
       <section class="card">
         <header class="section-head"><div><h2>Opening readings</h2>
           <p>${state.last ? "Readings carry forward from the last submitted shift for each nozzle." : "Enter the current meter reading for each nozzle."}</p>
@@ -221,11 +279,16 @@ function showManager(state) {
           })}
         </div>`).join("")}</div>
       </section>
-      <section class="card compact"><h2>Selling rates</h2><dl class="key-values">
-        ${fuelNames.map(fuel => `<div><dt>${fuel}</dt><dd>${money(setup.fuels[fuel].rate)} / L</dd></div>`).join("")}
-      </dl></section>
-      ${errorbox}<button class="primary">Open shift →</button>
+      <section class="card shift-start"><h2>Selling rates</h2><dl class="key-values">
+        ${fuelNames.map(fuel => `<div><dt>${fuel}</dt><dd>${setup.fuels[fuel].rate ? money(setup.fuels[fuel].rate) + " / L" : "Not set"}</dd></div>`).join("")}
+      </dl>
+      ${missingRates ? '<p class="form-help">Ask the owner to set both fuel rates before opening a shift.</p>'
+        : `${errorbox}<button class="primary">Open shift ${icon("arrow")}</button>`}</section>
     </form>`);
+  if (missingRates) {
+    document.querySelector("#open-shift").addEventListener("submit", event => event.preventDefault());
+    return;
+  }
   bindForm("open-shift", async form => {
     const values = fields(form);
     const openings = Object.fromEntries(setup.nozzles.map(nozzle => [nozzle.id, values["opening_" + nozzle.id]]));
@@ -347,49 +410,103 @@ function updatePreview(form, active) {
   showMetric("variance", counted === null || expected === null ? null : counted - expected, true);
 }
 
+function dashboardMetric(label, value, detail, glyph, color) {
+  return `<div class="summary-card ${color}"><div class="summary-top"><span>${label}</span>
+    <span class="summary-icon">${icon(glyph)}</span></div>
+    <strong>${value}</strong><small>${detail}</small></div>`;
+}
+
+function reviewStatus(shift) {
+  return `<span class="status ${shift.reviewed_at ? "reviewed" : ""}">${shift.reviewed_at ? "Reviewed" : "Awaiting review"}</span>`;
+}
+
 function showOwner(data) {
   selectedDate = data.date;
-  shell(`${heading("Station performance", "Daily dashboard", "Sales and reconciliations from submitted shifts.")}
+  const totalSales = fuelNames.reduce((total, fuel) => total + data.daily[fuel].sales, 0);
+  const totalVolume = fuelNames.reduce((total, fuel) => total + data.daily[fuel].litres, 0);
+  const pending = data.shifts.filter(shift => !shift.reviewed_at).length;
+  const missingRates = fuelNames.some(fuel => !data.setup.fuels[fuel].rate);
+  shell(`<div class="dashboard-heading">
+    ${heading(businessDay(data.date), "Daily dashboard", "Review fuel sales, stock and shift reconciliations.")}
+    <label class="date-control">Business date<input id="date" type="date" value="${safe(data.date)}"></label>
+  </div>
+  ${missingRates ? `<div class="setup-notice"><span class="setup-icon">${icon("warning")}</span>
+    <div><strong>Set fuel prices to start selling</strong><p>Enter the Petrol and Diesel rates before a manager opens a shift.</p></div>
+    <button id="setup-rates" class="secondary" type="button">Set fuel rates ${icon("arrow")}</button></div>` : ""}
+  <section class="summary-grid" aria-label="Daily totals">
+    ${dashboardMetric("Total fuel sales", money(totalSales), "Petrol and Diesel", "sales", "summary-featured")}
+    ${dashboardMetric("Fuel volume sold", volume(totalVolume), "Across all nozzles", "volume", "summary-blue")}
+    ${dashboardMetric("Submitted shifts", data.shifts.length, "For this business date", "receipt", "summary-green")}
+    ${dashboardMetric("Awaiting review", pending, pending ? "Shifts to reconcile" : "No pending reviews", "review", "summary-amber")}
+  </section>
+  <div class="dashboard-grid">
     <section class="card">
-      <header class="section-head date-head"><div><h2>Fuel sales</h2><p>${safe(businessDay(data.date))}</p></div>
-        <label>Business date<input id="date" type="date" value="${safe(data.date)}"></label>
-      </header>
-      <div class="fuel-grid">${fuelNames.map(fuel => `<div class="metric">
-        ${fuelTag(fuel)}<strong>${money(data.daily[fuel].sales)}</strong>
-        <span>${volume(data.daily[fuel].litres)} sold</span>
-      </div>`).join("")}</div>
+      <header class="section-head"><div><h2>Sales by fuel</h2><p>Totals from submitted shifts on the selected date.</p></div>
+        <span class="panel-icon">${icon("sales")}</span></header>
+      <div class="fuel-split">${fuelNames.map(fuel => {
+        const item = data.daily[fuel];
+        const share = totalVolume > 0 ? Math.round(100 * item.litres / totalVolume) : 0;
+        return `<div class="fuel-split-row">
+          <div class="fuel-line"><div>${fuelTag(fuel)}<small>${volume(item.litres)} sold</small></div>
+            <strong>${money(item.sales)}</strong></div>
+          <progress class="volume-share ${fuel.toLowerCase()}" max="100" value="${share}" aria-label="${fuel} share of litres sold"></progress>
+        </div>`;
+      }).join("")}</div>
     </section>
     <section class="card">
-      <header class="section-head"><div><h2>Submitted shifts</h2><p>Open a report to inspect readings and record your review.</p></div>
-        <span class="count">${data.shifts.length} submitted</span></header>
-      ${data.shifts.length ? `<div class="shift-list">${data.shifts.map(shift => `
-        <button class="shift-row" id="shift-${shift.id}" type="button">
-          <span><strong>Shift #${shift.id}</strong><small>${safe(shift.submitter)} · ${timestamp(shift.submitted_at)}</small></span>
-          <span><strong>${money(shift.sales)}</strong><small>Cash difference ${money(shift.cash_difference)}</small></span>
-          <span class="status ${shift.reviewed_at ? "reviewed" : ""}">${shift.reviewed_at ? "Reviewed" : "Awaiting review"}</span>
-          <span class="shift-arrow" aria-hidden="true">→</span>
-        </button>`).join("")}</div>` : '<p class="empty">No submitted shifts for this business date.</p>'}
-    </section>
-    <section class="card">
-      <header class="section-head"><div><h2>Fuel stock</h2><p>Current station stock through the latest submitted shift.</p></div></header>
-      <div class="fuel-grid">${fuelNames.map(fuel => {
+      <header class="section-head"><div><h2>Fuel stock</h2><p>Station balance through the latest submitted shift.</p></div>
+        <span class="panel-icon">${icon("pump")}</span></header>
+      <div class="stock-list">${fuelNames.map(fuel => {
         const item = data.stock[fuel];
-        return `<div class="metric stock">${fuelTag(fuel)}
-          <span>Calculated stock</span><strong>${volume(item.calculated)}</strong>
+        return `<details class="stock-detail">
+          <summary><span>${fuelTag(fuel)}<small>Calculated stock</small></span>
+            <strong class="${item.calculated < 0 ? "discrepancy" : ""}">${volume(item.calculated)}</strong></summary>
           <dl class="key-values">
             <div><dt>Opening stock</dt><dd>${volume(item.opening)}</dd></div>
-            <div><dt>Delivered</dt><dd>+ ${volume(item.delivery)}</dd></div>
-            <div><dt>Metered sales</dt><dd>− ${volume(item.sold)}</dd></div>
+            <div><dt>Delivered</dt><dd>${volume(item.delivery)}</dd></div>
+            <div><dt>Metered sales</dt><dd>${volume(item.sold)}</dd></div>
             <div><dt>Latest physical stock</dt><dd>${item.physical ? volume(item.physical.litres) : "No reading"}</dd></div>
           </dl>
           ${item.physical ? `<small>Measured in shift #${item.physical.shift_id} · ${timestamp(item.physical.at)}</small>` : ""}
-        </div>`;
+        </details>`;
       }).join("")}</div>
-    </section>`);
+    </section>
+  </div>
+  <section class="card shifts-card">
+    <header class="section-head"><div><h2 id="shift-heading">Submitted shifts</h2><p>Open a shift to review meter readings and collections.</p></div>
+      <span class="count">${data.shifts.length} submitted</span></header>
+    ${data.shifts.length ? `<div class="table-scroll" role="region" aria-labelledby="shift-heading" tabindex="0">
+      <table class="shift-table">
+        <thead><tr><th scope="col">Shift / submitted by</th><th scope="col">Submitted at</th><th scope="col" class="numeric">Metered sales</th>
+          <th scope="col" class="numeric">Cash difference</th><th scope="col">Review status</th><th scope="col"><span class="sr-only">Open report</span></th></tr></thead>
+        <tbody>${data.shifts.map(shift => `<tr>
+          <th scope="row"><strong>Shift #${shift.id}</strong><small>${safe(shift.submitter)}</small></th>
+          <td>${timestamp(shift.submitted_at)}</td><td class="numeric">${money(shift.sales)}</td>
+          <td class="numeric ${shift.cash_difference ? "discrepancy" : ""}">${money(shift.cash_difference)}</td>
+          <td>${reviewStatus(shift)}</td>
+          <td><button class="row-action" id="shift-${shift.id}" type="button" aria-label="Open shift ${shift.id} report">${icon("arrow")}</button></td>
+        </tr>`).join("")}</tbody>
+      </table></div>` : `<div class="empty-state"><span class="empty-icon">${icon("receipt")}</span>
+        <strong>No shifts submitted</strong><p>Completed shifts for this business date will appear here.</p></div>`}
+  </section>`);
+  if (missingRates) listen("setup-rates", openSettings);
   listen("date", async event => {
-    if (!event.target.value) return;
-    const updated = await api("/dashboard?date=" + encodeURIComponent(event.target.value));
-    showOwner(updated);
+    const control = event.target;
+    const date = control.value;
+    if (!date || date === selectedDate) return;
+    control.setAttribute("aria-busy", "true");
+    try {
+      const updated = await api("/dashboard?date=" + encodeURIComponent(date));
+      if (!control.isConnected || control.value !== date) return;
+      showOwner(updated);
+      document.querySelector("#date").focus({ preventScroll: true });
+    } catch (error) {
+      if (!control.isConnected || control.value !== date) return;
+      control.value = selectedDate;
+      throw error;
+    } finally {
+      control.removeAttribute("aria-busy");
+    }
   }, "change");
   for (const shift of data.shifts) {
     listen("shift-" + shift.id, async () => showReport(await api("/shifts/" + shift.id)));
@@ -456,7 +573,7 @@ async function openTeam() {
 }
 
 function showTeam(managers, added = false) {
-  shell(`${heading("Station access", "Team")}
+  shell(`${heading("", "Team", "Create and view station manager accounts.")}
     ${added ? '<p class="success" role="status">Manager account created. Share the sign-in details privately.</p>' : ""}
     <section class="card">
       <h2>Station managers</h2>
@@ -476,7 +593,7 @@ function showTeam(managers, added = false) {
         <small id="manager-password-help">Use a password of 7–200 characters.</small>
         ${errorbox}<button class="primary">Create manager account</button>
       </form>
-    </section>`);
+    </section>`, "team");
   bindForm("add-manager", async form => {
     const manager = await api("/managers", fields(form));
     showTeam([...managers, manager], true);
@@ -489,12 +606,12 @@ async function openSettings() {
 }
 
 function showSettings(setup, canEditStock, confirmation = "") {
-  shell(`${heading("Station configuration", "Settings")}
+  shell(`${heading("", "Station settings", "Manage selling rates, nozzles and opening stock.")}
     ${confirmation ? `<div class="success" role="status">${safe(confirmation)}</div>` : ""}
     <section class="card"><header class="section-head"><div><h2>Selling rates</h2><p>Rate changes apply when the manager opens a shift.</p></div></header>
       <form id="rates"><div class="field-grid">
         ${fuelNames.map(fuel => numberField(fuel + " (₹ / L)", fuel, {
-          value: decimal(setup.fuels[fuel].rate, 100), required: true, min: 0.01, max: 1000,
+          value: setup.fuels[fuel].rate ? decimal(setup.fuels[fuel].rate, 100) : undefined, required: true, min: 0.01, max: 1000,
         })).join("")}
       </div>${errorbox}<button class="primary">Save rates</button></form>
     </section>
@@ -512,7 +629,7 @@ function showSettings(setup, canEditStock, confirmation = "") {
           value: decimal(setup.fuels[fuel].opening_stock, 1000), required: true, readonly: !canEditStock,
         })).join("")}
       </div>${canEditStock ? errorbox + '<button class="primary">Save opening stock</button>' : ""}</form>
-    </section>`);
+    </section>`, "settings");
   const save = (id, field, feedback) => bindForm(id, async form => {
     await api("/settings", { [field]: fields(form) });
     const dashboard = await api("/dashboard");
