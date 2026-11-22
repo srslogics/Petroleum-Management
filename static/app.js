@@ -124,7 +124,6 @@ function showLogin(message = "") {
   });
   bindForm("login", async form => {
     await api("/login", fields(form));
-    session = await api("/session");
     await showHome();
   }, false);
 }
@@ -238,11 +237,11 @@ function fuelTag(fuel) {
 }
 
 async function showHome() {
-  if (role === "manager") {
-    showManager(await api("/shift"));
-  } else {
-    showOwner(await api("/dashboard" + (selectedDate ? "?date=" + encodeURIComponent(selectedDate) : "")));
-  }
+  const state = await api(role === "manager" ? "/shift" :
+    "/dashboard" + (selectedDate ? "?date=" + encodeURIComponent(selectedDate) : ""));
+  session = state.session;
+  if (role === "manager") showManager(state);
+  else showOwner(state);
 }
 
 function showManager(state) {
@@ -586,7 +585,7 @@ function showTeam(managers, added = false) {
 }
 
 async function openSettings() {
-  const dashboard = await api("/dashboard");
+  const dashboard = await api("/settings");
   showSettings(dashboard.setup, dashboard.can_edit_opening_stock);
 }
 
@@ -617,7 +616,7 @@ function showSettings(setup, canEditStock, confirmation = "") {
     </section>`, "settings");
   const save = (id, field, feedback) => bindForm(id, async form => {
     await api("/settings", { [field]: fields(form) });
-    const dashboard = await api("/dashboard");
+    const dashboard = await api("/settings");
     showSettings(dashboard.setup, dashboard.can_edit_opening_stock, feedback);
   });
   save("rates", "rates", "Selling rates saved.");
@@ -633,7 +632,6 @@ async function initialize() {
   }
   document.title = roleTitle + " | Pump Ledger";
   try {
-    session = await api("/session");
     await showHome();
   } catch (error) {
     showLogin(error.status === 401 ? "" : error.message);

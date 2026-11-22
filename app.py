@@ -20,7 +20,7 @@ from urllib.parse import parse_qs
 from wsgiref.simple_server import WSGIServer, make_server
 from zoneinfo import ZoneInfo
 
-from database import TursoDatabase, open_db, transaction
+from database import TursoDatabase, execute_many, open_db, read_snapshot, transaction
 
 ROOT = Path(__file__).resolve().parent
 TZ = ZoneInfo("Asia/Kolkata")
@@ -69,6 +69,15 @@ CREATE TABLE IF NOT EXISTS reviews (
 """
 
 
+STATIC_FILES = {
+    "/app.js": "text/javascript", "/styles.css": "text/css", "/daily-report.js": "text/javascript",
+}
+
+
+def asset_version(body):
+    return hashlib.sha256(body).hexdigest()[:16]
+
+
 class RequestError(Exception):
     def __init__(self, status, message):
         self.status = status
@@ -109,10 +118,9 @@ def initialize(database, demo, env):
     if isinstance(database, Path):
         database.parent.mkdir(parents=True, exist_ok=True)
     with closing(open_db(database)) as db, transaction(db, immediate=True):
-        for statement in SCHEMA.split(";"):
-            if statement.strip():
-                db.execute(statement.strip())
-        columns = {row["name"] for row in db.execute("PRAGMA table_info(users)")}
+        schema = [(statement.strip(), ()) for statement in SCHEMA.split(";") if statement.strip()]
+        *_, info = execute_many(db, [*schema, ("PRAGMA table_info(users)", ())])
+        columns = {row["name"] for row in info}
         if "email" in columns and "login_id" not in columns:
             db.execute("ALTER TABLE users RENAME COLUMN email TO login_id")
         if db.execute("SELECT 1 FROM stations LIMIT 1").fetchone():
@@ -201,17 +209,28 @@ def note(value, label, limit=250):
     return value.strip()
 
 
+def config_queries(sid):
+    return [
+        ("SELECT fuel, rate, opening_stock FROM fuels WHERE station_id = ?", (sid,)),
+        ("SELECT id, code, fuel FROM nozzles WHERE station_id = ? ORDER BY id", (sid,)),
+    ]
+
+
+def unpack_config(fuels, nozzles):
+    return {"fuels": {row["fuel"]: dict(row) for row in fuels}, "nozzles": [dict(row) for row in nozzles]}
+
+
 def config(db, sid):
-    return {
-        "fuels": {row["fuel"]: dict(row) for row in db.execute(
-            "SELECT fuel, rate, opening_stock FROM fuels WHERE station_id = ?", (sid,))},
-        "nozzles": [dict(row) for row in db.execute(
-            "SELECT id, code, fuel FROM nozzles WHERE station_id = ? ORDER BY id", (sid,))],
-    }
+    return unpack_config(*execute_many(db, config_queries(sid)))
+
+
+OPEN_SHIFT_QUERY = "SELECT * FROM shifts WHERE station_id = ? AND submitted_at IS NULL"
+LATEST_SHIFT_QUERY = """SELECT id, business_date, submitted_at, report_json FROM shifts
+                        WHERE station_id = ? AND submitted_at IS NOT NULL ORDER BY id DESC LIMIT 1"""
 
 
 def get_open(db, sid):
-    return db.execute("SELECT * FROM shifts WHERE station_id = ? AND submitted_at IS NULL", (sid,)).fetchone()
+    return db.execute(OPEN_SHIFT_QUERY, (sid,)).fetchone()
 
 
 def shift_identity(row):
@@ -222,21 +241,26 @@ def open_shift_public(row):
     return {**shift_identity(row), **json.loads(row["opening_json"])}
 
 
-def manager_state(db, sid):
-    active = get_open(db, sid)
-    if active:
-        return {"active": open_shift_public(active)}
-    current = config(db, sid)
-    readings = {}
+def manager_state(db, sid, *, in_write=False):
+    queries = [(OPEN_SHIFT_QUERY, (sid,)), *config_queries(sid), (LATEST_SHIFT_QUERY, (sid,))]
+    if in_write:
+        active = get_open(db, sid)
+        if active:
+            return {"active": open_shift_public(active)}
+        fuels, nozzles, latest = [list(rows) for rows in execute_many(db, queries[1:])]
+    else:
+        active, fuels, nozzles, latest = read_snapshot(db, queries)
+        if active:
+            return {"active": open_shift_public(active[0])}
+    current = unpack_config(fuels, nozzles)
     last = None
-    for row in db.execute("""SELECT id, business_date, submitted_at, report_json FROM shifts
-                             WHERE station_id = ? AND submitted_at IS NOT NULL ORDER BY id DESC""", (sid,)):
-        if last is None:
-            last = {key: row[key] for key in ("id", "business_date", "submitted_at")}
-        for nozzle in json.loads(row["report_json"])["nozzles"]:
-            readings.setdefault(nozzle["id"], nozzle["closing"])
-        if len(readings) == len(current["nozzles"]):
-            break
+    readings = {}
+    if latest:
+        row = latest[0]
+        last = {key: row[key] for key in ("id", "business_date", "submitted_at")}
+        # New nozzles can only be added. Any nozzle absent from the most
+        # recent submitted shift has no older opening to carry forward.
+        readings = {nozzle["id"]: nozzle["closing"] for nozzle in json.loads(row["report_json"])["nozzles"]}
     for nozzle in current["nozzles"]:
         nozzle["opening"] = readings.get(nozzle["id"])
     return {"active": None, "setup": current, "last": last}
@@ -246,7 +270,7 @@ def start_shift(db, user, body):
     sid = user["station_id"]
     manual = mapping(body.get("openings", {}), "opening readings")
     with transaction(db, immediate=True):
-        state = manager_state(db, sid)
+        state = manager_state(db, sid, in_write=True)
         if state["active"]:
             fail("A shift is already open. Reload to resume it.", 409)
         setup = state["setup"]
@@ -333,52 +357,76 @@ def submit_shift(db, user, shift_id, body):
         return report(db, sid, shift_id)
 
 
+def stock_query(sid, fuel):
+    path = f"$.fuels.{fuel}"
+    return ("""
+        WITH totals AS (
+          SELECT COUNT(*) AS submitted,
+                 COALESCE(SUM(json_extract(report_json, ?)), 0) AS delivery,
+                 COALESCE(SUM(json_extract(report_json, ?)), 0) AS sold,
+                 MAX(CASE WHEN json_extract(report_json, ?) IS NOT NULL THEN id END) AS reading_id
+          FROM shifts WHERE station_id = ? AND submitted_at IS NOT NULL
+        )
+        SELECT totals.*, s.submitted_at AS measured_at, json_extract(s.report_json, ?) AS measured
+        FROM totals LEFT JOIN shifts s ON s.id = totals.reading_id
+        """, (path + ".delivery", path + ".litres", path + ".physical", sid, path + ".physical"))
+
+
 def owner_state(db, sid, selected):
-    setup = config(db, sid)
+    fuels, nozzles, petrol, diesel, rows = read_snapshot(db, [
+        *config_queries(sid), *(stock_query(sid, fuel) for fuel in FUELS),
+        ("""SELECT s.id, s.submitted_at, s.report_json, u.name AS submitter, r.reviewed_at
+            FROM shifts s JOIN users u ON u.id = s.submitted_by LEFT JOIN reviews r ON r.shift_id = s.id
+            WHERE s.station_id = ? AND s.business_date = ? AND s.submitted_at IS NOT NULL ORDER BY s.id DESC""",
+         (sid, selected)),
+    ])
+    setup = unpack_config(fuels, nozzles)
     daily = {fuel: {"litres": 0, "sales": 0} for fuel in FUELS}
-    stock = {fuel: {"opening": setup["fuels"][fuel]["opening_stock"], "delivery": 0, "sold": 0, "physical": None}
-             for fuel in FUELS}
+    stock = {}
+    for fuel, totals in zip(FUELS, (petrol[0], diesel[0])):
+        opening = setup["fuels"][fuel]["opening_stock"]
+        physical = None if totals["measured"] is None else {
+            "litres": totals["measured"], "shift_id": totals["reading_id"], "at": totals["measured_at"],
+        }
+        stock[fuel] = {
+            "opening": opening, "delivery": totals["delivery"], "sold": totals["sold"],
+            "calculated": opening + totals["delivery"] - totals["sold"], "physical": physical,
+        }
     shifts = []
-    has_submitted = False
-    for row in db.execute("""SELECT s.id, s.business_date, s.submitted_at, s.report_json,
-                                    u.name AS submitter, r.reviewed_at
-                             FROM shifts s JOIN users u ON u.id = s.submitted_by
-                             LEFT JOIN reviews r ON r.shift_id = s.id
-                             WHERE s.station_id = ? ORDER BY s.id DESC""", (sid,)):
-        has_submitted = True
+    for row in rows:
         payload = json.loads(row["report_json"])
         for fuel in FUELS:
-            values = payload["fuels"][fuel]
-            inventory = stock[fuel]
-            inventory["delivery"] += values["delivery"]
-            inventory["sold"] += values["litres"]
-            if inventory["physical"] is None and values["physical"] is not None:
-                inventory["physical"] = {"litres": values["physical"], "shift_id": row["id"], "at": row["submitted_at"]}
-            if row["business_date"] == selected:
-                daily[fuel]["litres"] += values["litres"]
-                daily[fuel]["sales"] += values["sales"]
-        if row["business_date"] == selected:
-            shifts.append({key: row[key] for key in ("id", "submitted_at", "submitter", "reviewed_at")} | {
-                "sales": payload["sales"], "cash_difference": payload["cash_difference"]})
-    for item in stock.values():
-        item["calculated"] = item["opening"] + item["delivery"] - item["sold"]
+            for field in ("litres", "sales"):
+                daily[fuel][field] += payload["fuels"][fuel][field]
+        shifts.append({key: row[key] for key in ("id", "submitted_at", "submitter", "reviewed_at")} | {
+            "sales": payload["sales"], "cash_difference": payload["cash_difference"],
+        })
     return {"date": selected, "daily": daily, "stock": stock, "shifts": shifts, "setup": setup,
-            "can_edit_opening_stock": not has_submitted}
+            "can_edit_opening_stock": not petrol[0]["submitted"]}
 
 
 def daily_owner_report(db, sid, selected):
-    opening = {row["fuel"]: row["opening_stock"] for row in db.execute(
-        "SELECT fuel, opening_stock FROM fuels WHERE station_id = ?", (sid,),
-    )}
-    # Send only the carry-forward totals over the database connection.
-    prior = db.execute("""
+    opening_rows, prior_rows, rows = read_snapshot(db, [
+        ("SELECT fuel, opening_stock FROM fuels WHERE station_id = ?", (sid,)),
+        ("""
         SELECT
           COALESCE(SUM(json_extract(report_json, '$.fuels.Petrol.delivery')
                        - json_extract(report_json, '$.fuels.Petrol.litres')), 0) AS Petrol,
           COALESCE(SUM(json_extract(report_json, '$.fuels.Diesel.delivery')
                        - json_extract(report_json, '$.fuels.Diesel.litres')), 0) AS Diesel
         FROM shifts WHERE station_id = ? AND business_date < ? AND submitted_at IS NOT NULL
-        """, (sid, selected)).fetchone()
+        """, (sid, selected)),
+        ("""
+        SELECT s.id, s.opened_at, s.submitted_at, s.report_json, u.name AS submitter,
+               r.reviewed_at, r.note AS review_note, reviewer.name AS reviewer
+        FROM shifts s JOIN users u ON u.id = s.submitted_by
+        LEFT JOIN reviews r ON r.shift_id = s.id
+        LEFT JOIN users reviewer ON reviewer.id = r.user_id
+        WHERE s.station_id = ? AND s.business_date = ? AND s.submitted_at IS NOT NULL ORDER BY s.id
+        """, (sid, selected)),
+    ])
+    opening = {row["fuel"]: row["opening_stock"] for row in opening_rows}
+    prior = prior_rows[0]
     fuels = {
         fuel: {"opening_stock": opening[fuel] + prior[fuel], "litres": 0, "sales": 0,
                "delivery": 0, "rates": [], "closing_stock": opening[fuel] + prior[fuel], "physical": None}
@@ -388,14 +436,6 @@ def daily_owner_report(db, sid, selected):
     till = dict.fromkeys(("expenses", "expected", "counted", "cash_difference", "shortage", "overage"), 0)
     shifts = []
     nozzles = {}
-    rows = db.execute("""
-        SELECT s.id, s.opened_at, s.submitted_at, s.report_json, u.name AS submitter,
-               r.reviewed_at, r.note AS review_note, reviewer.name AS reviewer
-        FROM shifts s JOIN users u ON u.id = s.submitted_by
-        LEFT JOIN reviews r ON r.shift_id = s.id
-        LEFT JOIN users reviewer ON reviewer.id = r.user_id
-        WHERE s.station_id = ? AND s.business_date = ? AND s.submitted_at IS NOT NULL ORDER BY s.id
-        """, (sid, selected))
     for row in rows:
         payload = json.loads(row["report_json"])
         for method in METHODS:
@@ -597,8 +637,7 @@ class Request:
                 result = user
             elif role == "manager" and route == "/shift":
                 if method == "GET":
-                    with transaction(db):
-                        result = manager_state(db, sid)
+                    result = manager_state(db, sid) | {"session": user}
                 else:
                     result = start_shift(db, user, data)
             elif role == "owner" and method == "GET" and route in ("/dashboard", "/daily-report"):
@@ -607,13 +646,19 @@ class Request:
                     selected = date.fromisoformat(day).isoformat()
                 except ValueError:
                     fail("Choose a valid business date.")
-                with transaction(db):
-                    view = owner_state if route == "/dashboard" else daily_owner_report
-                    result = view(db, sid, selected)
+                view = owner_state if route == "/dashboard" else daily_owner_report
+                result = view(db, sid, selected) | {"session": user}
             elif role == "owner" and route == "/managers":
                 result = list_managers(db, sid) if method == "GET" else create_manager(db, sid, data)
-            elif role == "owner" and method == "POST" and route == "/settings":
-                result = save_config(db, sid, data)
+            elif role == "owner" and route == "/settings":
+                if method == "GET":
+                    fuels, nozzles, submitted = read_snapshot(db, [
+                        *config_queries(sid),
+                        ("SELECT 1 FROM shifts WHERE station_id = ? AND submitted_at IS NOT NULL LIMIT 1", (sid,)),
+                    ])
+                    result = {"setup": unpack_config(fuels, nozzles), "can_edit_opening_stock": not submitted}
+                else:
+                    result = save_config(db, sid, data)
             else:
                 result = self.shift_route(db, user, role, method, route, data)
             return result, None
@@ -642,19 +687,18 @@ class Request:
                 fail("Page not found.", 404)
             if path == "/healthz":
                 return 200, b'{"ok":true}', json_type, None
-            assets = {
-                "/": ("index.html", "text/html"), "/manager": ("index.html", "text/html"),
-                "/owner": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"),
-                "/styles.css": ("styles.css", "text/css"),
-                "/daily-report.js": ("daily-report.js", "text/javascript"),
-            }
-            if path not in assets:
-                fail("Page not found.", 404)
-            name, content_type = assets[path]
-            body = (ROOT / "static" / name).read_bytes()
-            if name == "index.html" and not self.demo:
-                body = body.replace(b'<meta name="demo-mode" content="true">', b'')
-            return 200, body, f"{content_type}; charset=utf-8", None
+            if path in STATIC_FILES:
+                body = (ROOT / "static" / path.lstrip("/")).read_bytes()
+                return 200, body, f"{STATIC_FILES[path]}; charset=utf-8", None
+            if path in ("/", "/manager", "/owner"):
+                body = (ROOT / "static" / "index.html").read_bytes()
+                if not self.demo:
+                    body = body.replace(b'<meta name="demo-mode" content="true">', b'')
+                for asset in STATIC_FILES:
+                    version = asset_version((ROOT / "static" / asset.lstrip("/")).read_bytes())
+                    body = body.replace(f'"{asset}"'.encode(), f'"{asset}?v={version}"'.encode())
+                return 200, body, "text/html; charset=utf-8", None
+            fail("Page not found.", 404)
         except RequestError as error:
             return error.status, json.dumps({"error": str(error)}).encode(), json_type, None
         except sqlite3.OperationalError as error:
@@ -675,10 +719,15 @@ def create_app(database=None, env=None):
 
     def application(environ, start_response):
         status, body, content_type, cookie = Request(environ, database, hosted, demo).dispatch()
+        path = environ["PATH_INFO"]
+        cache_control = "no-store"
+        if (status == 200 and path in STATIC_FILES
+                and environ.get("QUERY_STRING", "") == "v=" + asset_version(body)):
+            cache_control = "public, max-age=31536000, immutable"
         headers = [
             ("Content-Type", content_type),
             ("Content-Length", str(len(body))),
-            ("Cache-Control", "no-store"),
+            ("Cache-Control", cache_control),
             ("X-Content-Type-Options", "nosniff"),
             ("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'"),
         ]

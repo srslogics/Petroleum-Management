@@ -85,11 +85,11 @@ class TursoConnection:
         self.deadline = time.monotonic() + 18
         self.closed = False
 
-    def pipeline(self, requests, *, closing=False):
+    def pipeline(self, requests, *, closing=False, timeout_limit=4):
         remaining = self.deadline - time.monotonic()
         if self.closed or remaining <= 0:
             raise sqlite3.OperationalError("Turso request deadline expired.")
-        timeout = min(1 if closing else 4, remaining)
+        timeout = min(timeout_limit, remaining)
         self.connection.timeout = timeout
         if self.connection.sock is not None:
             self.connection.sock.settimeout(timeout)
@@ -129,26 +129,46 @@ class TursoConnection:
             raise
 
     def execute(self, sql, params=()):
-        request = execute_request(sql, params)
-        requests = [request] if self.baton else [execute_request("PRAGMA foreign_keys = ON", want_rows=False), request]
-        results = self.pipeline(requests)
-        for result in results:
-            result = check_result(result)
-        try:
-            block = result["result"]
-            columns = [column["name"] for column in block["cols"]]
-            return TursoRows(dict(zip(columns, (decode_value(cell) for cell in row))) for row in block["rows"])
-        except (KeyError, TypeError, ValueError):
-            raise sqlite3.OperationalError("Invalid Turso SQL response.") from None
+        return self.execute_many(((sql, params),))[0]
+
+    def execute_many(self, statements):
+        requests = [execute_request(sql, params) for sql, params in statements]
+        if not self.baton:
+            requests.insert(0, execute_request("PRAGMA foreign_keys = ON", want_rows=False))
+            first, *results = self.pipeline(requests)
+            check_result(first)
+        else:
+            results = self.pipeline(requests)
+        return [result_rows(result) for result in results]
+
+    def snapshot(self, statements):
+        # A read transaction gives all statements one view of the books. The
+        # final rollback and close can run even if one of the reads fails.
+        requests = [execute_request("BEGIN", want_rows=False)]
+        requests.extend(execute_request(sql, params) for sql, params in statements)
+        requests.extend((execute_request("ROLLBACK", want_rows=False), {"type": "close"}))
+        begin, *results, rollback, closed = self.pipeline(requests, closing=True)
+        for control in (begin, rollback, closed):
+            check_result(control)
+        return [list(result_rows(result)) for result in results]
 
     def close(self):
         try:
             if self.baton and not self.closed:
                 with suppress(sqlite3.Error):
-                    self.pipeline([{"type": "close"}], closing=True)
+                    self.pipeline([{"type": "close"}], closing=True, timeout_limit=1)
         finally:
             self.closed = True
             self.connection.close()
+
+
+def result_rows(result):
+    try:
+        block = check_result(result)["result"]
+        columns = [column["name"] for column in block["cols"]]
+        return TursoRows(dict(zip(columns, (decode_value(cell) for cell in row))) for row in block["rows"])
+    except (KeyError, TypeError, ValueError):
+        raise sqlite3.OperationalError("Invalid Turso SQL response.") from None
 
 
 class TursoRows:
@@ -177,6 +197,19 @@ def open_db(database):
         db.close()
         raise
     return db
+
+
+def execute_many(db, statements):
+    if isinstance(db, TursoConnection):
+        return db.execute_many(statements)
+    return [db.execute(sql, params) for sql, params in statements]
+
+
+def read_snapshot(db, statements):
+    if isinstance(db, TursoConnection):
+        return db.snapshot(statements)
+    with transaction(db):
+        return [list(rows) for rows in execute_many(db, statements)]
 
 
 @contextmanager

@@ -1,6 +1,7 @@
 """Exercise the WSGI application and SQLite without binding a TCP port."""
 import io
 import json
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -23,6 +24,7 @@ class Browser:
         self.origin = origin
         self.cookies = {}
         self.set_cookies = {}
+        self.response_headers = {}
 
     def request(self, path, data=None, cookie=None, origin=None):
         method = "GET" if data is None else "POST"
@@ -49,6 +51,7 @@ class Browser:
         finally:
             chunks.close()
         headers = response["headers"]
+        self.response_headers[path] = headers
         if "Set-Cookie" in headers:
             self.set_cookies[role] = headers["Set-Cookie"]
             self.cookies[role] = headers["Set-Cookie"].split(";", 1)[0]
@@ -78,6 +81,17 @@ class WorkflowTest(unittest.TestCase):
         self.expect(403, "/api/owner/login", manager)
         self.expect(200, "/api/manager/login", manager)
         self.expect(200, "/api/owner/login", owner)
+
+    def test_only_versioned_public_assets_are_cached(self):
+        html = self.expect(200, "/owner").decode()
+        self.assertEqual(self.browser.response_headers["/owner"]["Cache-Control"], "no-store")
+        for asset in ("/styles.css", "/app.js", "/daily-report.js"):
+            versioned = re.search(re.escape(asset) + r"\?v=[a-f0-9]{16}", html)[0]
+            self.assertEqual(self.expect(200, versioned), self.expect(200, asset))
+            self.assertIn("immutable", self.browser.response_headers[versioned]["Cache-Control"])
+            self.assertEqual(self.browser.response_headers[asset]["Cache-Control"], "no-store")
+        self.expect(401, "/api/owner/dashboard")
+        self.assertEqual(self.browser.response_headers["/api/owner/dashboard"]["Cache-Control"], "no-store")
 
     def test_two_consecutive_shifts(self):
         self.assertIn(b"Pump Ledger", self.expect(200, "/manager"))
@@ -234,6 +248,7 @@ class HostedTest(unittest.TestCase):
             "TURSO_AUTH_TOKEN": "test-only-token",
         }
 
+        self.pipeline_count = 0
         database_path = self.database
         test = self
 
@@ -247,6 +262,7 @@ class HostedTest(unittest.TestCase):
                 test.addCleanup(self.db.close)
 
             def request(self, method, path, body, headers):
+                test.pipeline_count += 1
                 test.assertEqual((method, path), ("POST", "/v2/pipeline"))
                 test.assertEqual(headers["Authorization"], "Bearer test-only-token")
                 request = json.loads(body)
@@ -288,6 +304,28 @@ class HostedTest(unittest.TestCase):
         transport = patch("database.HTTPSConnection", PipelineServer)
         self.addCleanup(transport.stop)
         transport.start()
+
+    def test_authenticated_screen_reads_use_two_database_requests(self):
+        env = self.env
+        database = TursoDatabase.from_env(env, required=True)
+        setup_owner(database, env, "9000000001", "TestOw7")
+        browser = Browser(create_app(env=env), "pump.onrender.com", "https://pump.onrender.com")
+        self.assertEqual(browser.request("/api/owner/login", {"identifier": "9000000001", "password": "TestOw7"})[0], 200)
+        for path in ("/api/owner/dashboard", "/api/owner/daily-report", "/api/owner/settings"):
+            before = self.pipeline_count
+            status, data = browser.request(path)
+            self.assertEqual((status, self.pipeline_count - before), (200, 2), path)
+            if path != "/api/owner/settings":
+                self.assertEqual(data["session"]["role"], "owner")
+                self.assertNotIn("password_hash", data["session"])
+        self.assertEqual(browser.request("/api/owner/managers", {
+            "name": "Test Manager", "phone": "9000000002", "password": "TestMg7",
+        })[0], 200)
+        self.assertEqual(browser.request("/api/manager/login", {"identifier": "9000000002", "password": "TestMg7"})[0], 200)
+        before = self.pipeline_count
+        status, data = browser.request("/api/manager/shift")
+        self.assertEqual((status, self.pipeline_count - before), (200, 2))
+        self.assertEqual(data["session"]["role"], "manager")
 
     def test_database_timeout_returns_json_and_keeps_health_responding(self):
         browser = Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
