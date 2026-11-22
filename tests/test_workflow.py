@@ -13,8 +13,8 @@ from urllib.parse import urlsplit
 from wsgiref.util import setup_testing_defaults
 from wsgiref.validate import validator
 
-from app import create_app
-from database import open_db
+from app import create_app, setup_owner
+from database import TursoDatabase, open_db
 
 
 class Browser:
@@ -203,16 +203,16 @@ class HostedTest(unittest.TestCase):
         modules.start()
 
     def test_configure_hosted_station_and_reopen_database(self):
-        env = self.env.copy()
-        with self.assertRaisesRegex(RuntimeError, "PETROLEUM_OWNER_PHONE"):
-            create_app(env=env)
+        env = self.env
         owner = {"identifier": "9000000001", "password": "Hosted-owner-test-password"}
         manager = {"identifier": "9000000002", "password": "Hosted-manager-test-password"}
-        env.update({
-            "PETROLEUM_OWNER_PHONE": "+91 90000 00001", "PETROLEUM_OWNER_PASSWORD": owner["password"],
-        })
         browser = Browser(create_app(env=env), "pump.onrender.com", "https://pump.onrender.com")
         self.assertEqual(browser.request("/healthz"), (200, {"ok": True}))
+        self.assertEqual(browser.request("/api/owner/login", owner)[0], 401)
+        database = TursoDatabase.from_env(env, required=True)
+        setup_owner(database, env, "+91 90000 00001", owner["password"])
+        with self.assertRaisesRegex(RuntimeError, "An owner already exists"):
+            setup_owner(database, env, "9000000003", "Different-test-password")
         self.assertNotIn(b'demo-mode', browser.request("/manager")[1])
         self.assertEqual(browser.request("/api/owner/login", owner, origin="https://unrelated.test")[0], 403)
         self.assertEqual(browser.request("/api/owner/login", owner, origin="http://pump.onrender.com")[0], 403)

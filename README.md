@@ -31,6 +31,17 @@ turso db tokens create petroleum-management
 
 Use `turso auth login` if the CLI asks you to sign in. Copy the database URL and the database token into Render's environment settings. Keep the token out of Git and chat. For this deployment the token needs write access so the app can create its schema and save shifts.
 
+### Create the owner in Turso once
+
+From the repository, run:
+
+```sh
+python3 -m pip install -r requirements.txt
+python3 app.py setup-owner
+```
+
+Enter the Turso URL and token when prompted, then enter the owner's mobile number and a unique password of at least 16 characters. The command saves the account in Turso with a password hash. An existing owner can continue signing in with their original credentials.
+
 ### Create the Render Web Service
 
 In the [Render Dashboard](https://dashboard.render.com/), select **New → Web Service** and connect `srslogics/Petroleum-Management` through your GitHub account.
@@ -51,15 +62,12 @@ Add these environment variables before selecting **Create Web Service**.
 
 | Environment variable | Value |
 | --- | --- |
-| `PETROLEUM_HOSTED` | `1` |
 | `TURSO_DATABASE_URL` | Database URL from `turso db show` |
 | `TURSO_AUTH_TOKEN` | Database token from `turso db tokens create` |
-| `PETROLEUM_OWNER_PHONE` | The owner’s Indian mobile number, with or without `+91` |
-| `PETROLEUM_OWNER_PASSWORD` | A unique password of at least 16 characters |
 
 Turso keeps the records for this deployment, so the Web Service needs no persistent disk. If you already deployed with SQLite and entered real records, back up that database before switching. The Turso setup initializes the configured remote database and does not import existing SQLite records.
 
-On first start, the app creates its tables, the owner account and the station. To set the station label, optionally add `PETROLEUM_STATION_NAME` and `PETROLEUM_STATION_CODE` before that first start. Changing the owner sign-in or station environment variables later does not update existing records. Existing accounts can continue to sign in with their original email addresses.
+The station and tables are initialized on the first app start or when running owner setup, whichever happens first. To set the station label at creation, provide `PETROLEUM_STATION_NAME` and `PETROLEUM_STATION_CODE` in the environment of that first run.
 
 Open `/owner` on the service's HTTPS URL. In **Settings**, enter the opening stock and current Petrol and Diesel rates and confirm the nozzle list. The initial list includes `P-01` and `D-01`. In **Team → Add a station manager**, enter the manager’s name, mobile number and password. Share the sign-in details privately. The manager can then sign in at `/manager` to enter the first shift’s meter readings.
 

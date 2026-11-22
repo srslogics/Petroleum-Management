@@ -11,6 +11,7 @@ import time
 from contextlib import closing
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from getpass import getpass
 from http import HTTPStatus
 from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
@@ -97,16 +98,6 @@ def valid_new_password(password):
             and password not in (account[3] for account in DEMO_USERS))
 
 
-def initial_owner(env):
-    phone = indian_mobile(env.get("PETROLEUM_OWNER_PHONE"))
-    if not phone:
-        raise RuntimeError("Set PETROLEUM_OWNER_PHONE to the owner's Indian mobile number.")
-    password = env.get("PETROLEUM_OWNER_PASSWORD")
-    if not valid_new_password(password):
-        raise RuntimeError("Set PETROLEUM_OWNER_PASSWORD to a unique password of 16–200 characters.")
-    return "owner", phone, "Owner", password
-
-
 def insert_user(db, station_id, role, login_id, name, salt, digest):
     db.execute("""INSERT INTO users(station_id, role, login_id, name, salt, password_hash)
                   VALUES (?, ?, ?, ?, ?, ?)""", (station_id, role, login_id, name, salt, digest))
@@ -127,7 +118,6 @@ def initialize(database, demo, env):
                                      tuple(user[1] for user in DEMO_USERS)).fetchone():
                 raise RuntimeError("Use a fresh hosted database. The configured database contains demo accounts.")
             return
-        users = DEMO_USERS if demo else (initial_owner(env),)
         if not demo:
             station = (env.get("PETROLEUM_STATION_NAME", "Fuel Station"),
                        env.get("PETROLEUM_STATION_CODE", "STATION-01"))
@@ -140,9 +130,26 @@ def initialize(database, demo, env):
             db.execute("INSERT INTO fuels VALUES (1, ?, ?, ?)", (fuel, rate, stock))
         for code, fuel in (("P-01", "Petrol"), ("D-01", "Diesel")):
             db.execute("INSERT INTO nozzles(station_id, code, fuel) VALUES (1, ?, ?)", (code, fuel))
-        for role, login_id, name, password in users:
+        for role, login_id, name, password in DEMO_USERS if demo else ():
             salt = secrets.token_hex(16)
             insert_user(db, 1, role, login_id, name, salt, password_hash(password, salt))
+
+
+def setup_owner(database, env, phone, password):
+    phone = indian_mobile(phone)
+    if not phone:
+        raise RuntimeError("Enter the owner's Indian mobile number.")
+    if not valid_new_password(password):
+        raise RuntimeError("Choose a unique password of 16–200 characters.")
+    salt = secrets.token_hex(16)
+    digest = password_hash(password, salt)
+    initialize(database, demo=False, env=env)
+    with closing(open_db(database)) as db, transaction(db, immediate=True):
+        if db.execute("SELECT 1 FROM users WHERE role = 'owner' AND station_id = 1").fetchone():
+            raise RuntimeError("An owner already exists for this station.")
+        if db.execute("SELECT 1 FROM users WHERE login_id = ?", (phone,)).fetchone():
+            raise RuntimeError("That mobile number is already registered.")
+        insert_user(db, 1, "owner", phone, "Owner", salt, digest)
 
 
 def number(value, places, label, optional=False):
@@ -588,9 +595,30 @@ class LocalServer(ThreadingMixIn, WSGIServer):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", nargs="?", choices=("setup-owner",),
+                        help="Create the first owner directly in Turso.")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--db", type=Path)
     args = parser.parse_args()
+    if args.command == "setup-owner":
+        env = os.environ.copy()
+        try:
+            if not env.get("TURSO_DATABASE_URL"):
+                env["TURSO_DATABASE_URL"] = input("Turso database URL: ")
+            if not env.get("TURSO_AUTH_TOKEN"):
+                env["TURSO_AUTH_TOKEN"] = getpass("Turso database token: ")
+            database = TursoDatabase.from_env(env, required=True)
+            phone = input("Owner mobile number: ")
+            password = getpass("Owner password: ")
+            if password != getpass("Confirm owner password: "):
+                raise RuntimeError("The passwords do not match.")
+            setup_owner(database, env, phone, password)
+        except (RuntimeError, sqlite3.Error) as error:
+            parser.exit(1, f"{error}\n")
+        except (EOFError, KeyboardInterrupt):
+            parser.exit(1, "Owner setup cancelled.\n")
+        print("Owner account created. Sign in at /owner.")
+        return
     with make_server("127.0.0.1", args.port, create_app(args.db), server_class=LocalServer) as server:
         print(f"Petroleum Management listening at http://127.0.0.1:{server.server_port}", flush=True)
         try:
