@@ -264,3 +264,47 @@ form > label + label, .password-entry { margin-top: .9rem; }
   .nozzle-row { grid-template-columns: minmax(0, 1fr); }
   .section-head { flex-wrap: wrap; }
 }
+
+.report-controls { display: flex; align-items: flex-end; justify-content: flex-end; flex-wrap: wrap; gap: .55rem; }
+.report-controls > button { white-space: nowrap; }
+.day-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.day-panels > .card { height: 100%; }
+.daily-empty { margin: 0 0 1rem; padding: .7rem .85rem; border: 1px solid var(--line); border-radius: .6rem; color: var(--muted); background: #fff; }
+.report-values > div { padding-block: .47rem; border-bottom: 1px solid var(--line); }
+.report-values > div:last-child { border: 0; }
+.report-values > div:nth-last-child(-n+2) { font-weight: 650; }
+.report-table :is(th, td) { vertical-align: top; }
+.report-table .numeric { white-space: nowrap; }
+.report-table .report-shift-link { justify-content: flex-start; text-align: left; margin: -.4rem 0 -.15rem -.45rem; }
+.daily-notes { display: grid; gap: .55rem; margin-top: .7rem; }
+.daily-notes > div { padding: .65rem .7rem; border: 1px solid var(--line); border-radius: .5rem; }
+.daily-notes p { margin-top: .28rem; white-space: pre-wrap; }
+@media (max-width: 900px) {
+  .report-controls { justify-content: flex-start; }
+}
+@media (max-width: 650px) {
+  .day-panels { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-heading:has(.report-controls) { align-items: flex-start; flex-direction: column; }
+}
+@media print {
+  @page { margin: 10mm; }
+  html, body { background: #fff; color: #151515; }
+  .sidebar, .topbar, .skip-link, .report-controls, .panel-icon { display: none !important; }
+  .workspace, .workspace-body, .page { display: block; width: 100%; max-width: none; padding: 0; margin: 0; }
+  .summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .3rem; }
+  .day-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem; }
+  .summary-card, .card { box-shadow: none; padding: .45rem .5rem; }
+  .summary-featured { background: #fff; color: #151515; border-color: var(--line); }
+  .summary-featured .summary-top, .summary-featured small { color: #353535; }
+  .summary-icon { display: none; }
+  .summary-card > strong { font-size: 14pt; }
+  h1 { font-size: 21pt; }
+  .section-head { break-after: avoid; }
+  .table-scroll { overflow: visible; }
+  .report-table { min-width: 0; font-size: 8pt; width: 100%; }
+  .report-table :is(th, td) { padding: .2rem .24rem; }
+  .report-table .numeric { white-space: normal; }
+  .report-table thead { display: table-header-group; }
+  .report-table tr, .summary-card, .day-panels > .card, .daily-notes > div { break-inside: avoid; }
+  .report-shift-link { color: #151515; min-height: 0; margin: 0 !important; padding: 0; font-size: inherit; }
+}

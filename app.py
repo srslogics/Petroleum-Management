@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS shifts (
     report_json TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS one_open_shift ON shifts(station_id) WHERE submitted_at IS NULL;
+CREATE INDEX IF NOT EXISTS submitted_shifts_by_date ON shifts(station_id, business_date, id)
+    WHERE submitted_at IS NOT NULL;
 CREATE TABLE IF NOT EXISTS reviews (
     shift_id INTEGER PRIMARY KEY REFERENCES shifts(id), user_id INTEGER NOT NULL REFERENCES users(id),
     reviewed_at TEXT NOT NULL, note TEXT NOT NULL
@@ -364,6 +366,77 @@ def owner_state(db, sid, selected):
             "can_edit_opening_stock": not has_submitted}
 
 
+def daily_owner_report(db, sid, selected):
+    opening = {row["fuel"]: row["opening_stock"] for row in db.execute(
+        "SELECT fuel, opening_stock FROM fuels WHERE station_id = ?", (sid,),
+    )}
+    # Send only the carry-forward totals over the database connection.
+    prior = db.execute("""
+        SELECT
+          COALESCE(SUM(json_extract(report_json, '$.fuels.Petrol.delivery')
+                       - json_extract(report_json, '$.fuels.Petrol.litres')), 0) AS Petrol,
+          COALESCE(SUM(json_extract(report_json, '$.fuels.Diesel.delivery')
+                       - json_extract(report_json, '$.fuels.Diesel.litres')), 0) AS Diesel
+        FROM shifts WHERE station_id = ? AND business_date < ? AND submitted_at IS NOT NULL
+        """, (sid, selected)).fetchone()
+    fuels = {
+        fuel: {"opening_stock": opening[fuel] + prior[fuel], "litres": 0, "sales": 0,
+               "delivery": 0, "rates": [], "closing_stock": opening[fuel] + prior[fuel], "physical": None}
+        for fuel in FUELS
+    }
+    payments = dict.fromkeys(METHODS, 0)
+    till = dict.fromkeys(("expenses", "expected", "counted", "cash_difference", "shortage", "overage"), 0)
+    shifts = []
+    nozzles = {}
+    rows = db.execute("""
+        SELECT s.id, s.opened_at, s.submitted_at, s.report_json, u.name AS submitter,
+               r.reviewed_at, r.note AS review_note, reviewer.name AS reviewer
+        FROM shifts s JOIN users u ON u.id = s.submitted_by
+        LEFT JOIN reviews r ON r.shift_id = s.id
+        LEFT JOIN users reviewer ON reviewer.id = r.user_id
+        WHERE s.station_id = ? AND s.business_date = ? AND s.submitted_at IS NOT NULL ORDER BY s.id
+        """, (sid, selected))
+    for row in rows:
+        payload = json.loads(row["report_json"])
+        for method in METHODS:
+            payments[method] += payload["collections"].get(method, 0)
+        for field in ("expenses", "expected", "counted", "cash_difference"):
+            till[field] += payload[field]
+        variance = payload["cash_difference"]
+        till["shortage"] += max(0, -variance)
+        till["overage"] += max(0, variance)
+        for fuel, summary in fuels.items():
+            entry = payload["fuels"][fuel]
+            for field in ("litres", "sales", "delivery"):
+                summary[field] += entry[field]
+            if entry["rate"] not in summary["rates"]:
+                summary["rates"].append(entry["rate"])
+            summary["closing_stock"] += entry["delivery"] - entry["litres"]
+            if entry.get("physical") is not None:
+                summary["physical"] = {
+                    "litres": entry["physical"], "shift_id": row["id"],
+                    "submitted_at": row["submitted_at"], "book_at_reading": summary["closing_stock"],
+                    "difference": entry["physical"] - summary["closing_stock"],
+                }
+        for nozzle in payload["nozzles"]:
+            meter = nozzles.setdefault(nozzle["id"], {
+                "code": nozzle["code"], "fuel": nozzle["fuel"], "opening": nozzle["opening"], "litres": 0,
+            })
+            meter["closing"] = nozzle["closing"]
+            meter["litres"] += nozzle["litres"]
+        fields = ("id", "opened_at", "submitted_at", "submitter", "reviewed_at", "review_note", "reviewer")
+        shifts.append({key: row[key] for key in fields} | {
+            key: payload[key] for key in ("expenses", "cash_difference", "sales", "collection_difference", "expense_note")
+        } | {"payments": {method: payload["collections"].get(method, 0) for method in METHODS}})
+    sales = sum(fuel["sales"] for fuel in fuels.values())
+    accounted = sum(payments.values())
+    return {
+        "date": selected, "payments": payments, "till": till, "fuels": fuels, "shifts": shifts,
+        "nozzles": list(nozzles.values()), "sales": sales, "litres": sum(fuel["litres"] for fuel in fuels.values()),
+        "receipts": accounted - payments["credit"], "accounted": accounted, "sales_difference": accounted - sales,
+    }
+
+
 def review_shift(db, user, shift_id, body):
     sid = user["station_id"]
     review_note = note(body.get("note", ""), "a review note", 500)
@@ -528,14 +601,15 @@ class Request:
                         result = manager_state(db, sid)
                 else:
                     result = start_shift(db, user, data)
-            elif role == "owner" and method == "GET" and route == "/dashboard":
+            elif role == "owner" and method == "GET" and route in ("/dashboard", "/daily-report"):
                 day = parse_qs(self.environ.get("QUERY_STRING", "")).get("date", [now()[:10]])[0]
                 try:
                     selected = date.fromisoformat(day).isoformat()
                 except ValueError:
                     fail("Choose a valid business date.")
                 with transaction(db):
-                    result = owner_state(db, sid, selected)
+                    view = owner_state if route == "/dashboard" else daily_owner_report
+                    result = view(db, sid, selected)
             elif role == "owner" and route == "/managers":
                 result = list_managers(db, sid) if method == "GET" else create_manager(db, sid, data)
             elif role == "owner" and method == "POST" and route == "/settings":
@@ -572,6 +646,7 @@ class Request:
                 "/": ("index.html", "text/html"), "/manager": ("index.html", "text/html"),
                 "/owner": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"),
                 "/styles.css": ("styles.css", "text/css"),
+                "/daily-report.js": ("daily-report.js", "text/javascript"),
             }
             if path not in assets:
                 fail("Page not found.", 404)

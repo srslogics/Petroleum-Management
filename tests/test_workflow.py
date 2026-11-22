@@ -84,6 +84,7 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn(b"Pump Ledger", self.expect(200, "/owner"))
         self.expect(200, "/app.js")
         self.expect(200, "/styles.css")
+        self.expect(200, "/daily-report.js")
         self.expect(401, "/api/manager/shift")
         self.login()
         initial = self.expect(200, "/api/manager/shift")
@@ -148,6 +149,55 @@ class WorkflowTest(unittest.TestCase):
         self.assertIsNotNone(dashboard["shifts"][1]["reviewed_at"])
         self.assertEqual(self.expect(200, "/api/owner/dashboard?date=2026-11-21")["shifts"], [])
 
+    def test_daily_report_payment_reconciliation_and_stock_carry_forward(self):
+        self.login()
+        first = self.expect(200, "/api/manager/shift", {"openings": {"1": "100", "2": "200"}})
+        self.expect(200, f"/api/manager/shifts/{first['id']}/submit", {
+            "closings": {"1": "110", "2": "210"}, "deliveries": {"Petrol": "100", "Diesel": "50"},
+            "collections": {"cash": "1000", "upi": "400", "card": "300", "credit": "268"},
+            "expenses": "50", "counted": "940", "physical": {"Petrol": "8088"}, "expense_note": "Cleaning",
+        })
+        self.expect(200, f"/api/owner/shifts/{first['id']}/review", {"note": "Cash checked"})
+        second = self.expect(200, "/api/manager/shift", {})
+        self.expect(200, f"/api/manager/shifts/{second['id']}/submit", {
+            "closings": {"1": "120", "2": "220"}, "collections": {"cash": "500", "upi": "1000", "card": "400"},
+            "counted": "510",
+        })
+        self.now.return_value = "2026-11-23T09:00:00+05:30"
+        outside = self.expect(200, "/api/manager/shift", {})
+        self.expect(200, f"/api/manager/shifts/{outside['id']}/submit", {
+            "closings": {"1": "125", "2": "220"}, "collections": {"cash": "522.50"}, "counted": "522.50",
+        })
+        response = self.expect(200, "/api/owner/daily-report?date=2026-11-22")
+        self.assertEqual(response["payments"], {"cash": 150000, "upi": 140000, "card": 70000, "credit": 26800})
+        self.assertEqual((response["sales"], response["receipts"], response["accounted"], response["sales_difference"]),
+                         (393600, 360000, 386800, -6800))
+        self.assertEqual(response["till"], {"expenses": 5000, "expected": 145000, "counted": 145000,
+                                           "cash_difference": 0, "shortage": 1000, "overage": 1000})
+        self.assertEqual(response["nozzles"][0], {
+            "code": "P-01", "fuel": "Petrol", "opening": 100000, "closing": 120000, "litres": 20000,
+        })
+        petrol = response["fuels"]["Petrol"]
+        self.assertEqual((petrol["opening_stock"], petrol["delivery"], petrol["closing_stock"]),
+                         (8000000, 100000, 8080000))
+        self.assertEqual(petrol["physical"], {
+            "litres": 8088000, "shift_id": first["id"], "submitted_at": "2026-11-22T10:00:00+05:30",
+            "book_at_reading": 8090000, "difference": -2000,
+        })
+        self.assertEqual([shift["id"] for shift in response["shifts"]], [first["id"], second["id"]])
+        self.assertEqual(response["shifts"][0]["review_note"], "Cash checked")
+        self.assertEqual(response["shifts"][0]["expense_note"], "Cleaning")
+        next_day = self.expect(200, "/api/owner/daily-report")
+        self.assertEqual(next_day["fuels"]["Petrol"]["opening_stock"], 8080000)
+        self.assertEqual(next_day["fuels"]["Petrol"]["closing_stock"], 8075000)
+        self.assertIsNone(next_day["fuels"]["Petrol"]["physical"])
+        self.assertEqual([shift["id"] for shift in next_day["shifts"]], [outside["id"]])
+        empty = self.expect(200, "/api/owner/daily-report?date=2026-11-24")
+        self.assertEqual(empty["shifts"], [])
+        self.assertEqual(empty["fuels"]["Petrol"]["opening_stock"], 8075000)
+        self.expect(400, "/api/owner/daily-report?date=2026-11-31")
+        self.expect(404, "/api/manager/daily-report")
+
     def test_original_email_accounts_survive_schema_update(self):
         with closing(open_db(self.database)) as db:
             db.execute("ALTER TABLE users RENAME COLUMN login_id TO email")
@@ -168,6 +218,7 @@ class WorkflowTest(unittest.TestCase):
         self.expect(404, f"/api/owner/shifts/{shift['id']}")
         self.expect(404, f"/api/owner/shifts/{shift['id']}/review", {"note": "Invalid station"})
         self.assertEqual(self.expect(200, "/api/owner/dashboard")["shifts"], [])
+        self.assertEqual(self.expect(200, "/api/owner/daily-report")["shifts"], [])
         self.expect(200, "/api/owner/logout", {})
         self.expect(401, "/api/owner/dashboard")
 
@@ -290,6 +341,8 @@ class HostedTest(unittest.TestCase):
                             "pump.onrender.com", "https://pump.onrender.com")
         restarted.cookies = browser.cookies.copy()
         self.assertEqual(restarted.request(f"/api/owner/shifts/{shift['id']}")[1]["sales"], 300000)
+        status, daily = restarted.request("/api/owner/daily-report")
+        self.assertEqual((status, daily["receipts"]), (200, 300000))
         self.assertEqual(restarted.request("/api/owner/logout", {})[0], 200)
         self.assertIn("; Secure", restarted.set_cookies["owner"])
         self.assertEqual(restarted.request("/api/owner/dashboard")[0], 401)

@@ -137,7 +137,7 @@ function showLogin(message = "") {
 
 function shell(content, view = "home") {
   const navigation = role === "owner"
-    ? [["home", "Overview", "dashboard"], ["settings", "Station settings", "settings"], ["team", "Team", "team"]]
+    ? [["home", "Overview", "dashboard"], ["daily-report", "Daily report", "receipt"], ["settings", "Station settings", "settings"], ["team", "Team", "team"]]
     : [["home", "Shift operations", "receipt"]];
   const shouldFocus = document.activeElement && document.activeElement !== document.body;
   const initials = session.name.split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join("").toUpperCase();
@@ -175,6 +175,7 @@ function shell(content, view = "home") {
   });
   if (role === "owner") {
     listen("settings", openSettings);
+    listen("daily-report", openDailyReport);
     listen("team", openTeam);
   }
 }
@@ -420,6 +421,27 @@ function reviewStatus(shift) {
   return `<span class="status ${shift.reviewed_at ? "reviewed" : ""}">${shift.reviewed_at ? "Reviewed" : "Awaiting review"}</span>`;
 }
 
+function bindDateFilter(endpoint, render) {
+  listen("date", async event => {
+    const control = event.target;
+    const date = control.value;
+    if (!date || date === selectedDate) return;
+    control.setAttribute("aria-busy", "true");
+    try {
+      const updated = await api(endpoint + "?date=" + encodeURIComponent(date));
+      if (!control.isConnected || control.value !== date) return;
+      render(updated);
+      document.querySelector("#date").focus({ preventScroll: true });
+    } catch (error) {
+      if (!control.isConnected || control.value !== date) return;
+      control.value = selectedDate;
+      throw error;
+    } finally {
+      control.removeAttribute("aria-busy");
+    }
+  }, "change");
+}
+
 function showOwner(data) {
   selectedDate = data.date;
   const totalSales = fuelNames.reduce((total, fuel) => total + data.daily[fuel].sales, 0);
@@ -428,7 +450,8 @@ function showOwner(data) {
   const missingRates = fuelNames.some(fuel => !data.setup.fuels[fuel].rate);
   shell(`<div class="dashboard-heading">
     ${heading(businessDay(data.date), "Daily dashboard", "Review fuel sales, stock and shift reconciliations.")}
-    <label class="date-control">Business date<input id="date" type="date" value="${safe(data.date)}"></label>
+    <div class="report-controls"><label class="date-control">Business date<input id="date" type="date" value="${safe(data.date)}"></label>
+      <button id="open-daily-report" class="secondary" type="button">Open daily report ${icon("arrow")}</button></div>
   </div>
   ${missingRates ? `<div class="setup-notice"><span class="setup-icon">${icon("warning")}</span>
     <div><strong>Set fuel prices to start selling</strong><p>Enter the Petrol and Diesel rates before a manager opens a shift.</p></div>
@@ -490,30 +513,14 @@ function showOwner(data) {
         <strong>No shifts submitted</strong><p>Completed shifts for this business date will appear here.</p></div>`}
   </section>`);
   if (missingRates) listen("setup-rates", openSettings);
-  listen("date", async event => {
-    const control = event.target;
-    const date = control.value;
-    if (!date || date === selectedDate) return;
-    control.setAttribute("aria-busy", "true");
-    try {
-      const updated = await api("/dashboard?date=" + encodeURIComponent(date));
-      if (!control.isConnected || control.value !== date) return;
-      showOwner(updated);
-      document.querySelector("#date").focus({ preventScroll: true });
-    } catch (error) {
-      if (!control.isConnected || control.value !== date) return;
-      control.value = selectedDate;
-      throw error;
-    } finally {
-      control.removeAttribute("aria-busy");
-    }
-  }, "change");
+  bindDateFilter("/dashboard", showOwner);
+  listen("open-daily-report", openDailyReport);
   for (const shift of data.shifts) {
     listen("shift-" + shift.id, async () => showReport(await api("/shifts/" + shift.id)));
   }
 }
 
-function showReport(shift) {
+function showReport(shift, source = "home") {
   const cashRows = [
     ...Object.entries(methodNames).map(([method, label]) => [label, shift.collections[method]]),
     ["Total collections", shift.collection_total],
@@ -523,7 +530,7 @@ function showReport(shift) {
     ["Actual cash counted", shift.counted],
     ["Cash difference (actual − expected)", shift.cash_difference, true],
   ];
-  shell(`<button id="back" type="button" class="text-button back">← Daily dashboard</button>
+  shell(`<button id="back" type="button" class="text-button back">← ${source === "daily-report" ? "Daily report" : "Daily dashboard"}</button>
     ${heading("Submitted shift", "Shift #" + shift.id, businessDay(shift.business_date) +
       " · Submitted by " + shift.submitter + " at " + timestamp(shift.submitted_at))}
     <div class="work-grid"><div class="stack">
@@ -561,10 +568,10 @@ function showReport(shift) {
       <dl class="key-values">${cashRows.map(([label, value, discrepancy]) => `<div><dt>${label}</dt>
         <dd class="${discrepancy && value ? "discrepancy" : ""}">${money(value)}</dd></div>`).join("")}</dl>
       ${shift.expense_note ? `<p class="review-note"><strong>Expense note</strong> ${safe(shift.expense_note)}</p>` : ""}
-    </aside></div>`);
-  listen("back", showHome);
+    </aside></div>`, source);
+  listen("back", source === "daily-report" ? openDailyReport : showHome);
   if (!shift.review) {
-    bindForm("review", async form => showReport(await api("/shifts/" + shift.id + "/review", fields(form))));
+    bindForm("review", async form => showReport(await api("/shifts/" + shift.id + "/review", fields(form)), source));
   }
 }
 
