@@ -165,6 +165,76 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(daily["shifts"][0]["entries"], report["entries"])
         self.expect(409, f"/api/manager/shifts/{active['id']}/submit", closing)
 
+    def test_full_detail_capacity_reaches_owner_and_daily_reports(self):
+        self.login()
+        shift = self.expect(200, "/api/manager/shift", {"openings": {"1": 100, "2": 200}})
+        route = f"/api/manager/shifts/{shift['id']}/submit"
+        text = {"party": "अ" * 150, "reference": "R" * 150, "note": "न" * 150}
+        entries = {
+            "payments": [dict(text, method="upi", amount="1.25") for _ in range(100)],
+            "expenses": [dict(text, amount="0.25") for _ in range(100)],
+            "deliveries": [dict(text, fuel="Diesel", quantity="0.125") for _ in range(100)],
+        }
+        body = {"closings": {"1": 101, "2": 202}, "collections": {"cash": 50}, "counted": 25, "entries": entries}
+        self.assertGreater(len(json.dumps(body)), 65536)
+        self.expect(400, route, body | {"entries": entries | {"payments": entries["payments"] + entries["payments"][:1]}})
+        self.expect(413, route, body | {"shift_note": "x" * (2 * 1024 * 1024)})
+        self.expect(413, "/api/owner/settings", {"note": "x" * 65536})
+        self.expect(200, route, body)
+        report = self.expect(200, f"/api/owner/shifts/{shift['id']}")
+        daily = self.expect(200, "/api/owner/daily-report")
+        self.assertEqual(daily["shifts"][0]["entries"], report["entries"])
+        self.assertEqual([len(rows) for rows in report["entries"].values()], [100, 100, 100])
+        self.assertEqual(report["entries"]["expenses"][-1]["note"], text["note"])
+        self.assertEqual((daily["payments"]["upi"], daily["till"]["expenses"]), (12500, 2500))
+        self.assertEqual((daily["fuels"]["Diesel"]["delivery"], daily["till"]["cash_difference"]), (12500, 0))
+
+    def test_invalid_closing_data_preserves_open_shift(self):
+        self.login()
+        shift = self.expect(200, "/api/manager/shift", {"openings": {"1": 100, "2": 200}})
+        route = f"/api/manager/shifts/{shift['id']}/submit"
+        body = {"closings": {"1": 101, "2": 202}, "collections": {}, "counted": 0}
+        for change in ({"collections": {"upi_amount": 300}}, {"physical": {"Petorl": 500}},
+                       {"deliveries": {"Petrol ": 200}}, {"entries": {"expense": []}},
+                       {"closings": {"1": 101, "2": 202, "3": 15}},
+                       {"counted": "0.1000000000000000000000000000001"}):
+            with self.subTest(change=change):
+                self.expect(400, route, body | change)
+        self.assertEqual(self.expect(200, "/api/manager/shift")["active"]["id"], shift["id"])
+        self.assertEqual(self.expect(200, "/api/owner/daily-report")["shifts"], [])
+        self.expect(200, route, body)
+
+    def test_shift_opened_before_midnight_and_concurrent_review(self):
+        self.login()
+        self.now.return_value = "2026-11-22T23:59:00+05:30"
+        openings = {"openings": {"1": 0, "2": 0}}
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: self.browser.request("/api/manager/shift", openings), range(2)))
+        self.assertEqual(sorted(status for status, _ in results), [200, 409])
+        shift_id = next(data["id"] for status, data in results if status == 200)
+        self.now.return_value = "2026-11-23T00:15:00+05:30"
+        self.expect(200, f"/api/manager/shifts/{shift_id}/submit",
+                    {"closings": {"1": 1, "2": 2}, "collections": {}, "counted": 0})
+        self.assertEqual(self.expect(200, "/api/owner/daily-report?date=2026-11-22")["litres"], 3000)
+        self.assertEqual(self.expect(200, "/api/owner/daily-report")["shifts"], [])
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda label: self.browser.request(
+                f"/api/owner/shifts/{shift_id}/review", {"note": label}), ("First check", "Second check")))
+        self.assertEqual(sorted(status for status, _ in results), [200, 409])
+        saved = next(data["review"] for status, data in results if status == 200)
+        self.assertEqual(self.expect(200, f"/api/owner/shifts/{shift_id}")["review"], saved)
+
+    def test_manager_session_and_logout_leave_owner_signed_in(self):
+        self.login()
+        self.assertEqual(self.expect(200, "/api/manager/session")["role"], "manager")
+        previous = self.browser.cookies["manager"]
+        self.expect(200, "/api/manager/logout", {})
+        self.expect(401, "/api/manager/shift", cookie=previous)
+        self.assertEqual(self.expect(200, "/api/owner/session")["role"], "owner")
+        with closing(open_db(self.database)) as db, db:
+            db.execute("UPDATE sessions SET expiry = 0")
+        self.expect(401, "/api/owner/settings")
+
     def test_two_consecutive_shifts(self):
         self.assertIn(b"Tuljai Petroleum", self.expect(200, "/manager"))
         self.assertIn(b"Tuljai Petroleum", self.expect(200, "/owner"))

@@ -27,6 +27,9 @@ ROOT = Path(__file__).resolve().parent
 TZ = ZoneInfo("Asia/Kolkata")
 FUELS = ("Petrol", "Diesel")
 METHODS = ("cash", "upi", "card", "credit")
+JSON_BODY_LIMIT = 64 * 1024
+# 300 detailed entries can contain 135,000 characters, including escaped Unicode.
+SHIFT_BODY_LIMIT = 2 * 1024 * 1024
 DEMO_USERS = (
     ("manager", "manager@demo.local", "Asha Patil", "ManagerDemo123!"),
     ("owner", "owner@demo.local", "Rohan Deshmukh", "OwnerDemo123!"),
@@ -191,23 +194,24 @@ def reset_owner(database, phone, password):
 def number(value, places, label, optional=False):
     if optional and (value is None or value == ""):
         return None
-    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
         fail(f"Enter a valid {label}.")
     try:
         parsed = Decimal(str(value).strip())
         if not parsed.is_finite() or not 0 <= parsed <= 1_000_000_000:
             raise InvalidOperation
-        scaled = parsed * (10 ** places)
-        if scaled != scaled.to_integral_value():
+        if parsed != parsed.quantize(Decimal(1).scaleb(-places)):
             raise InvalidOperation
-        return int(scaled)
+        return int(parsed.scaleb(places))
     except (InvalidOperation, ValueError):
         fail(f"Enter {label} from 0 to 1,000,000,000 with up to {places} decimal places.")
 
 
-def mapping(value, label):
+def mapping(value, label, allowed=None):
     if not isinstance(value, dict):
         fail(f"Enter valid {label}.")
+    if allowed is not None and value.keys() - set(allowed):
+        fail(f"Unrecognised field in {label}. Check the entries and try again.")
     return value
 
 
@@ -358,13 +362,13 @@ def submit_shift(db, user, shift_id, body):
             fail("Shift not found.", 404)
         if row["submitted_at"]:
             fail("This shift has already been submitted.", 409)
-        mapping(body.get("entries", {}), "shift entries")
+        mapping(body.get("entries", {}), "shift entries", ("payments", "deliveries", "expenses"))
         entries = shift_entries(body)
         draft = json.loads(row["opening_json"])
-        closings = mapping(body.get("closings"), "closing readings")
-        collections_input = mapping(body.get("collections"), "collections")
-        deliveries_input = mapping(body.get("deliveries", {}), "deliveries")
-        physical_input = mapping(body.get("physical", {}), "physical stock readings")
+        closings = mapping(body.get("closings"), "closing readings", (str(n["id"]) for n in draft["nozzles"]))
+        collections_input = mapping(body.get("collections"), "collections", METHODS)
+        deliveries_input = mapping(body.get("deliveries", {}), "deliveries", FUELS)
+        physical_input = mapping(body.get("physical", {}), "physical stock readings", FUELS)
         litres = dict.fromkeys(FUELS, 0)
         for nozzle in draft["nozzles"]:
             closing_reading = number(closings.get(str(nozzle["id"])), 3, f'{nozzle["code"]} closing reading')
@@ -377,24 +381,20 @@ def submit_shift(db, user, shift_id, body):
         for fuel in FUELS:
             rate = draft["rates"][fuel]
             sales = int((Decimal(litres[fuel]) * rate / 1000).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            delivered = [entry["quantity"] for entry in entries["deliveries"] if entry["fuel"] == fuel]
             fuels[fuel] = {
                 "litres": litres[fuel], "rate": rate, "sales": sales,
-                "delivery": number(deliveries_input.get(fuel), 3, f"{fuel} delivery", optional=True) or 0,
+                "delivery": sum(delivered) if delivered else (
+                    number(deliveries_input.get(fuel), 3, f"{fuel} delivery", optional=True) or 0),
                 "physical": number(physical_input.get(fuel), 3, f"{fuel} physical stock", optional=True),
             }
-        collections = {method: number(collections_input.get(method), 2, f"{method} collection", optional=True) or 0
-                       for method in METHODS}
-        expenses = number(body.get("expenses"), 2, "till expenses", optional=True) or 0
+        collections = {}
         for method in METHODS:
-            recorded = [entry for entry in entries["payments"] if entry["method"] == method]
-            if recorded:
-                collections[method] = sum(entry["amount"] for entry in recorded)
-        for fuel in FUELS:
-            delivered = [entry for entry in entries["deliveries"] if entry["fuel"] == fuel]
-            if delivered:
-                fuels[fuel]["delivery"] = sum(entry["quantity"] for entry in delivered)
-        if entries["expenses"]:
-            expenses = sum(entry["amount"] for entry in entries["expenses"])
+            amounts = [entry["amount"] for entry in entries["payments"] if entry["method"] == method]
+            collections[method] = sum(amounts) if amounts else (
+                number(collections_input.get(method), 2, f"{method} collection", optional=True) or 0)
+        expenses = (sum(entry["amount"] for entry in entries["expenses"]) if entries["expenses"] else
+                    number(body.get("expenses"), 2, "till expenses", optional=True) or 0)
         counted = number(body.get("counted"), 2, "actual cash counted")
         expected = collections["cash"] - expenses
         sales = sum(item["sales"] for item in fuels.values())
@@ -611,7 +611,7 @@ class Request:
         self.demo = demo
         self.public_url = public_url
 
-    def payload(self):
+    def payload(self, limit=JSON_BODY_LIMIT):
         if self.environ.get("CONTENT_TYPE", "").partition(";")[0].strip().lower() != "application/json":
             fail("Send a JSON request.", 415)
         origin = self.environ.get("HTTP_ORIGIN")
@@ -620,10 +620,10 @@ class Request:
             fail("Invalid request origin.", 403)
         try:
             size = int(self.environ.get("CONTENT_LENGTH") or "0")
-            if not 0 < size <= 65536:
+            if not 0 < size <= limit:
                 fail("Invalid request size.", 413)
-            return mapping(json.loads(self.environ["wsgi.input"].read(size)), "request data")
-        except (ValueError, UnicodeError, RecursionError):
+            return mapping(json.loads(self.environ["wsgi.input"].read(size), parse_float=Decimal), "request data")
+        except (ValueError, UnicodeError, InvalidOperation, RecursionError):
             fail("Invalid JSON request.")
 
     def token(self, role):
@@ -655,10 +655,13 @@ class Request:
         if not match:
             fail("Page not found.", 404)
         role, route = match.groups()
-        data = self.payload() if method == "POST" else None
         login = method == "POST" and route == "/login"
         if not login and not self.token(role):
             fail("Sign in to continue.", 401)
+        data = None
+        if method == "POST":
+            closing_shift = role == "manager" and re.fullmatch(r"/shifts/[0-9]{1,18}/submit", route)
+            data = self.payload(SHIFT_BODY_LIMIT if closing_shift else JSON_BODY_LIMIT)
         with closing(open_db(self.database)) as db:
             if login:
                 identifier = note(data.get("identifier", data.get("email", "")), "a mobile number or email", 254).lower()
