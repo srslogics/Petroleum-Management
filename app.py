@@ -128,6 +128,8 @@ CREATE TABLE IF NOT EXISTS reviews (
 
 STATIC_FILES = {
     "/app.js": "text/javascript", "/styles.css": "text/css", "/workspace.css": "text/css", "/daily-report.js": "text/javascript",
+    "/typography.css": "text/css",
+    "/fonts/inter-latin.woff2": "font/woff2", "/fonts/inter-latin-ext.woff2": "font/woff2",
     "/tuljai-logo.jpg": "image/jpeg",
     "/manager-entries.js": "text/javascript",
     "/owner-business.js": "text/javascript",

@@ -109,7 +109,7 @@ The test starts a local server on an available port with a temporary SQLite data
 
 Open `/owner` or `/manager` on the Render HTTPS URL, then tap **Install app**. Supported Android browsers show an installation prompt. In Safari on iPhone, use **Share → Add to Home Screen**. Each role has its own install identity and starts at its own sign-in page.
 
-An installed app requires internet access for sign-in, reports and saving operations. Offline launches show a connection screen. The app displays an offline notice if the connection drops while entering a shift. Keep that page open to retain unsaved entries, then reconnect and check whether the shift was submitted before trying again. The service worker stores only the public offline screen and installation images.
+An installed app requires internet access for sign-in, reports and saving operations. Offline launches show a connection screen. The app displays an offline notice if the connection drops while entering a shift. Keep that page open to retain unsaved entries, then reconnect and check whether the shift was submitted before trying again. The service worker stores only the public offline screen, its typography assets and installation images.
 
 ## Social link previews
 
@@ -158,3 +158,11 @@ In **Team**, the owner can edit a manager's name/mobile number, reset their pass
 **Exceptions** spans all business dates: cash and collection differences, physical/book stock differences, pending reviews, overdue shifts, correction requests, unallocated credit, overdue customers, pending settlements/deposits and configured tank warnings. Acknowledge an issue with a follow-up note. Acknowledgement does not clear the actual discrepancy; a changed amount or status brings the issue back to attention. Exceptions whose underlying condition is fixed disappear from the active list.
 
 In **Operations**, configure the usable combined tank capacity and low stock threshold for Petrol and Diesel. The overview shows percentages only after configuration, warns at the configured threshold and flags stock above capacity. These use calculated stock through submitted shifts, rather than live sensor readings.
+
+## Typography
+
+Both roles, sign-in, reports and the offline screen use the shared scale in `static/typography.css`. Layout styles in `styles.css` and `workspace.css` do not set their own font sizes or weights. Inputs stay at 16px on phones; labels and table text use the same sizes across screens. Currency and reconciliation figures use tabular numerals.
+
+Inter Variable 5.3.0 is bundled in `static/fonts` under the adjacent SIL Open Font License. Fonts load from the app's origin, including the rupee glyph, with system fallback for scripts outside the bundled subsets. The service worker stores these public typography assets for the offline screen. No external font service is required.
+
+`npm test` checks actual font loading, headings, inputs, buttons, tables, small text, overflow and offline typography across owner and manager screens at 1440px, 1024px, 390px and 320px widths.
