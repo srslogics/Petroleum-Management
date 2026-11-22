@@ -41,6 +41,10 @@ python3 app.py setup-owner
 
 Enter the Turso URL and token when prompted, then enter the owner's mobile number and a password of 7–200 characters. The command saves the account in Turso with a password hash. An existing owner can continue signing in with their original credentials.
 
+### Reset the existing owner sign-in
+
+If owner setup reports that an owner already exists, run `python3 app.py reset-owner` from the repository with the same Turso database configuration as Render. Enter the mobile number you want to use at sign-in and confirm the new password. The command updates the existing owner and signs out their active sessions.
+
 ### Create the Render Web Service
 
 In the [Render Dashboard](https://dashboard.render.com/), select **New → Web Service** and connect `srslogics/Petroleum-Management` through your GitHub account.

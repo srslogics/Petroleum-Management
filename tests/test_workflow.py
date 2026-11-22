@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from wsgiref.util import setup_testing_defaults
 from wsgiref.validate import validator
 
-from app import create_app, setup_owner
+from app import create_app, reset_owner, setup_owner
 from database import TursoDatabase, encode_arg, open_db
 
 
@@ -293,6 +293,27 @@ class HostedTest(unittest.TestCase):
         self.assertEqual(restarted.request("/api/owner/logout", {})[0], 200)
         self.assertIn("; Secure", restarted.set_cookies["owner"])
         self.assertEqual(restarted.request("/api/owner/dashboard")[0], 401)
+
+    def test_reset_owner_preserves_account_and_revokes_sessions(self):
+        env = self.env
+        database = TursoDatabase.from_env(env, required=True)
+        setup_owner(database, env, "9000000001", "TestOw7")
+        browser = Browser(create_app(env=env), "pump.onrender.com", "https://pump.onrender.com")
+        old = {"identifier": "9000000001", "password": "TestOw7"}
+        self.assertEqual(browser.request("/api/owner/login", old)[0], 200)
+        original_id = browser.request("/api/owner/session")[1]["id"]
+        self.assertEqual(browser.request("/api/owner/managers", {
+            "name": "Test Manager", "phone": "9000000002", "password": "TestMg7",
+        })[0], 200)
+        with self.assertRaisesRegex(RuntimeError, "different account"):
+            reset_owner(database, "9000000002", "TestOw8")
+        self.assertEqual(browser.request("/api/owner/session")[0], 200)
+        reset_owner(database, "+91 90000 00003", "TestOw8")
+        self.assertEqual(browser.request("/api/owner/session")[0], 401)
+        self.assertEqual(browser.request("/api/owner/login", old)[0], 401)
+        self.assertEqual(browser.request("/api/owner/login", {"identifier": "9000000003", "password": "TestOw8"})[0], 200)
+        self.assertEqual(browser.request("/api/owner/session")[1]["id"], original_id)
+        self.assertEqual(len(browser.request("/api/owner/managers")[1]), 1)
 
     def test_reject_missing_turso_config_and_demo_database(self):
         with self.assertRaisesRegex(RuntimeError, "Set both TURSO_DATABASE_URL and TURSO_AUTH_TOKEN"):

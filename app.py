@@ -135,14 +135,18 @@ def initialize(database, demo, env):
             insert_user(db, 1, role, login_id, name, salt, password_hash(password, salt))
 
 
-def setup_owner(database, env, phone, password):
+def owner_credentials(phone, password):
     phone = indian_mobile(phone)
     if not phone:
         raise RuntimeError("Enter the owner's Indian mobile number.")
     if not valid_new_password(password):
         raise RuntimeError("Use a password of 7–200 characters.")
     salt = secrets.token_hex(16)
-    digest = password_hash(password, salt)
+    return phone, salt, password_hash(password, salt)
+
+
+def setup_owner(database, env, phone, password):
+    phone, salt, digest = owner_credentials(phone, password)
     initialize(database, demo=False, env=env)
     with closing(open_db(database)) as db, transaction(db, immediate=True):
         if db.execute("SELECT 1 FROM users WHERE role = 'owner' AND station_id = 1").fetchone():
@@ -150,6 +154,20 @@ def setup_owner(database, env, phone, password):
         if db.execute("SELECT 1 FROM users WHERE login_id = ?", (phone,)).fetchone():
             raise RuntimeError("That mobile number is already registered.")
         insert_user(db, 1, "owner", phone, "Owner", salt, digest)
+
+
+def reset_owner(database, phone, password):
+    phone, salt, digest = owner_credentials(phone, password)
+    with closing(open_db(database)) as db, transaction(db, immediate=True):
+        owners = list(db.execute("SELECT id FROM users WHERE station_id = 1 AND role = 'owner' LIMIT 2"))
+        if len(owners) != 1:
+            raise RuntimeError("Owner reset requires exactly one existing owner for this station.")
+        owner_id = owners[0]["id"]
+        if db.execute("SELECT 1 FROM users WHERE login_id = ? AND id <> ?", (phone, owner_id)).fetchone():
+            raise RuntimeError("That mobile number is already registered to a different account.")
+        db.execute("UPDATE users SET login_id = ?, salt = ?, password_hash = ? WHERE id = ?",
+                   (phone, salt, digest, owner_id))
+        db.execute("DELETE FROM sessions WHERE user_id = ?", (owner_id,))
 
 
 def number(value, places, label, optional=False):
@@ -488,8 +506,13 @@ class Request:
                 expiry = 12 * 60 * 60
                 with transaction(db, immediate=True):
                     db.execute("DELETE FROM sessions WHERE expiry <= ?", (int(time.time()),))
-                    db.execute("INSERT INTO sessions VALUES (?, ?, ?)",
-                               (hashlib.sha256(token.encode()).hexdigest(), user["id"], int(time.time()) + expiry))
+                    issued = db.execute("""INSERT INTO sessions(token_hash, user_id, expiry)
+                        SELECT ?, id, ? FROM users WHERE id = ? AND salt = ?
+                        RETURNING token_hash""",
+                        (hashlib.sha256(token.encode()).hexdigest(), int(time.time()) + expiry,
+                         user["id"], user["salt"])).fetchone()
+                    if not issued:
+                        fail("Sign-in details changed. Please sign in again.", 401)
                 return {"ok": True}, self.session_cookie(role, token, expiry)
             user = self.authenticated(db, role)
             sid = user["station_id"]
@@ -598,12 +621,12 @@ class LocalServer(ThreadingMixIn, WSGIServer):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", nargs="?", choices=("setup-owner",),
-                        help="Create the first owner directly in Turso.")
+    parser.add_argument("command", nargs="?", choices=("setup-owner", "reset-owner"),
+                        help="Create or reset the owner directly in Turso.")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--db", type=Path)
     args = parser.parse_args()
-    if args.command == "setup-owner":
+    if args.command:
         env = os.environ.copy()
         try:
             if not env.get("TURSO_DATABASE_URL"):
@@ -615,12 +638,16 @@ def main():
             password = getpass("Owner password: ")
             if password != getpass("Confirm owner password: "):
                 raise RuntimeError("The passwords do not match.")
-            setup_owner(database, env, phone, password)
+            if args.command == "reset-owner":
+                reset_owner(database, phone, password)
+            else:
+                setup_owner(database, env, phone, password)
         except (RuntimeError, sqlite3.Error) as error:
             parser.exit(1, f"{error}\n")
         except (EOFError, KeyboardInterrupt):
             parser.exit(1, "Owner setup cancelled.\n")
-        print("Owner account created. Sign in at /owner.")
+        message = "Owner sign-in reset" if args.command == "reset-owner" else "Owner account created"
+        print(f"{message}. Sign in at /owner.")
         return
     with make_server("127.0.0.1", args.port, create_app(args.db), server_class=LocalServer) as server:
         print(f"Petroleum Management listening at http://127.0.0.1:{server.server_port}", flush=True)
