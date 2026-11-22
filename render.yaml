@@ -6,17 +6,15 @@ services:
     region: singapore
     numInstances: 1
     buildCommand: python -m pip install -r requirements.txt && python -m unittest discover -s tests -v
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --preload 'app:create_app()'
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 'app:create_app()'
     healthCheckPath: /healthz
-    disk:
-      name: petroleum-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: PETROLEUM_HOSTED
         value: "1"
-      - key: PETROLEUM_DB
-        value: /var/data/petroleum.sqlite3
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
       - key: PETROLEUM_OWNER_EMAIL
         sync: false
       - key: PETROLEUM_OWNER_PASSWORD

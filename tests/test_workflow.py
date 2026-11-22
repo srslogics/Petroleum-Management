@@ -1,17 +1,20 @@
 """Exercise the WSGI application and SQLite without binding a TCP port."""
 import io
 import json
+import sqlite3
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import urlsplit
 from wsgiref.util import setup_testing_defaults
 from wsgiref.validate import validator
 
-from app import create_app, open_db
+from app import create_app
+from database import open_db
 
 
 class Browser:
@@ -165,52 +168,78 @@ class WorkflowTest(unittest.TestCase):
 
 
 class HostedTest(unittest.TestCase):
-    def test_configure_hosted_station_and_reopen_database(self):
-        with tempfile.TemporaryDirectory() as directory:
-            database = Path(directory) / "petroleum.sqlite3"
-            env = {"RENDER": "true", "PETROLEUM_DB": str(database)}
-            with self.assertRaisesRegex(RuntimeError, "PETROLEUM_MANAGER_EMAIL"):
-                create_app(env=env)
-            owner = {"email": "owner@example.test", "password": "Hosted-owner-test-password"}
-            manager = {"email": "manager@example.test", "password": "Hosted-manager-test-password"}
-            env.update({
-                "PETROLEUM_OWNER_EMAIL": owner["email"], "PETROLEUM_OWNER_PASSWORD": owner["password"],
-                "PETROLEUM_MANAGER_EMAIL": manager["email"], "PETROLEUM_MANAGER_PASSWORD": manager["password"],
-            })
-            browser = Browser(create_app(env=env), "pump.onrender.com", "https://pump.onrender.com")
-            self.assertEqual(browser.request("/healthz"), (200, {"ok": True}))
-            self.assertNotIn(b'demo-mode', browser.request("/manager")[1])
-            self.assertEqual(browser.request("/api/owner/login", owner, origin="https://unrelated.test")[0], 403)
-            self.assertEqual(browser.request("/api/owner/login", owner, origin="http://pump.onrender.com")[0], 403)
-            self.assertEqual(browser.request("/api/owner/login", owner)[0], 200)
-            self.assertIn("; Secure", browser.set_cookies["owner"])
-            self.assertEqual(browser.request("/api/manager/login", manager)[0], 200)
-            openings = {"openings": {"1": "100", "2": "200"}}
-            self.assertEqual(browser.request("/api/manager/shift", openings)[0], 409)
-            self.assertEqual(browser.request("/api/owner/settings", {"rates": {"Petrol": "105", "Diesel": "90"}})[0], 200)
-            status, shift = browser.request("/api/manager/shift", openings)
-            self.assertEqual(status, 200)
-            self.assertEqual(browser.request(f"/api/manager/shifts/{shift['id']}/submit", {
-                "closings": {"1": "120", "2": "210"}, "collections": {"cash": "3000"}, "counted": "3000",
-            })[0], 200)
-            restarted = Browser(create_app(env={"RENDER": "true", "PETROLEUM_DB": str(database)}),
-                                "pump.onrender.com", "https://pump.onrender.com")
-            restarted.cookies = browser.cookies.copy()
-            self.assertEqual(restarted.request(f"/api/owner/shifts/{shift['id']}")[1]["sales"], 300000)
-            self.assertEqual(restarted.request("/api/owner/logout", {})[0], 200)
-            self.assertIn("; Secure", restarted.set_cookies["owner"])
-            self.assertEqual(restarted.request("/api/owner/dashboard")[0], 401)
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.database = Path(directory.name) / "petroleum.sqlite3"
+        self.env = {
+            "RENDER": "true",
+            "TURSO_DATABASE_URL": "libsql://pump-example.turso.io",
+            "TURSO_AUTH_TOKEN": "test-only-token",
+        }
 
-    def test_reject_hosted_demo_db_and_missing_disk(self):
-        with tempfile.TemporaryDirectory() as directory:
-            database = Path(directory) / "demo.sqlite3"
-            create_app(database, env={})
-            with self.assertRaisesRegex(RuntimeError, "contains demo accounts"):
-                create_app(env={"RENDER": "true", "PETROLEUM_DB": str(database)})
-            with self.assertRaisesRegex(RuntimeError, "persistent disk mount"):
-                create_app(env={"RENDER": "true", "PETROLEUM_DB": str(database.parent / "missing" / "app.db")})
-            with self.assertRaisesRegex(RuntimeError, "absolute path"):
-                create_app(env={"RENDER": "true"})
+        try:
+            import libsql
+        except ModuleNotFoundError:
+            libsql = SimpleNamespace(connect=sqlite3.connect, Error=ValueError)
+        driver_connect = libsql.connect
+
+        def connect(*, database, auth_token, isolation_level):
+            self.assertEqual(database, self.env["TURSO_DATABASE_URL"])
+            self.assertEqual(auth_token, self.env["TURSO_AUTH_TOKEN"])
+            return driver_connect(str(self.database), isolation_level=isolation_level)
+
+        # Render's build exercises the native driver against a local test
+        # file. Local tests can run with SQLite when libsql is unavailable.
+        driver = SimpleNamespace(connect=connect, Error=libsql.Error)
+        modules = patch.dict("sys.modules", {"libsql": driver})
+        self.addCleanup(modules.stop)
+        modules.start()
+
+    def test_configure_hosted_station_and_reopen_database(self):
+        env = self.env.copy()
+        with self.assertRaisesRegex(RuntimeError, "PETROLEUM_MANAGER_EMAIL"):
+            create_app(env=env)
+        owner = {"email": "owner@example.test", "password": "Hosted-owner-test-password"}
+        manager = {"email": "manager@example.test", "password": "Hosted-manager-test-password"}
+        env.update({
+            "PETROLEUM_OWNER_EMAIL": owner["email"], "PETROLEUM_OWNER_PASSWORD": owner["password"],
+            "PETROLEUM_MANAGER_EMAIL": manager["email"], "PETROLEUM_MANAGER_PASSWORD": manager["password"],
+        })
+        browser = Browser(create_app(env=env), "pump.onrender.com", "https://pump.onrender.com")
+        self.assertEqual(browser.request("/healthz"), (200, {"ok": True}))
+        self.assertNotIn(b'demo-mode', browser.request("/manager")[1])
+        self.assertEqual(browser.request("/api/owner/login", owner, origin="https://unrelated.test")[0], 403)
+        self.assertEqual(browser.request("/api/owner/login", owner, origin="http://pump.onrender.com")[0], 403)
+        self.assertEqual(browser.request("/api/owner/login", owner)[0], 200)
+        self.assertIn("; Secure", browser.set_cookies["owner"])
+        self.assertEqual(browser.request("/api/manager/login", manager)[0], 200)
+        openings = {"openings": {"1": "100", "2": "200"}}
+        self.assertEqual(browser.request("/api/manager/shift", openings)[0], 409)
+        self.assertEqual(browser.request("/api/owner/settings", {"rates": {"Petrol": "105", "Diesel": "90"}})[0], 200)
+        self.assertEqual(browser.request("/api/owner/settings", {"nozzle": {"code": "P-01", "fuel": "Petrol"}})[0], 409)
+        self.assertEqual(browser.request("/api/owner/settings", {"opening_stock": {"Petrol": "1000", "Diesel": "2000"}})[0], 200)
+        status, shift = browser.request("/api/manager/shift", openings)
+        self.assertEqual(status, 200)
+        self.assertEqual(browser.request(f"/api/manager/shifts/{shift['id']}/submit", {
+            "closings": {"1": "120", "2": "210"}, "collections": {"cash": "3000"}, "counted": "3000",
+        })[0], 200)
+        restarted = Browser(create_app(env=self.env),
+                            "pump.onrender.com", "https://pump.onrender.com")
+        restarted.cookies = browser.cookies.copy()
+        self.assertEqual(restarted.request(f"/api/owner/shifts/{shift['id']}")[1]["sales"], 300000)
+        self.assertEqual(restarted.request("/api/owner/logout", {})[0], 200)
+        self.assertIn("; Secure", restarted.set_cookies["owner"])
+        self.assertEqual(restarted.request("/api/owner/dashboard")[0], 401)
+
+    def test_reject_missing_turso_config_and_demo_database(self):
+        with self.assertRaisesRegex(RuntimeError, "Set both TURSO_DATABASE_URL and TURSO_AUTH_TOKEN"):
+            create_app(env={"RENDER": "true", "PETROLEUM_DB": str(self.database)})
+        with self.assertRaisesRegex(RuntimeError, "database URL from Turso"):
+            create_app(env=self.env | {"TURSO_DATABASE_URL": "http://pump-example.turso.io"})
+        create_app(self.database, env={})
+        with self.assertRaisesRegex(RuntimeError, "contains demo accounts"):
+            create_app(env=self.env)
 
 
 if __name__ == "__main__":

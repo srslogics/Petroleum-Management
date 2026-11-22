@@ -1,6 +1,6 @@
 # Petroleum Management
 
-Phase 1 serves two web apps from one Python backend and SQLite database. The repository started with a README, so the first version uses Python's standard library with plain HTML, CSS and JavaScript. It needs Python 3.10+ and an installed time zone database with `Asia/Kolkata`. There is no build step.
+Phase 1 serves two web apps from one Python backend and Turso database on Render. Local development uses SQLite by default. The repository started with a README, so the first version uses Python's standard library with plain HTML, CSS and JavaScript. It needs Python 3.10+ and an installed time zone database with `Asia/Kolkata`. There is no build step.
 
 ## Run locally
 
@@ -19,7 +19,21 @@ Each app has a **Fill demo sign-in** button. Keep both apps open in separate tab
 
 ## Deploy on Render
 
-In the [Render Dashboard](https://dashboard.render.com/), select **New → Web Service**. Connect `srslogics/Petroleum-Management` through your GitHub account.
+### Create the Turso database
+
+Run these commands in your Mac terminal. Use a dedicated **libSQL** database, which is the default for this Turso CLI. If you already created a dedicated libSQL database, use its name and start with the second command.
+
+```sh
+turso db create petroleum-management --wait
+turso db show petroleum-management --url
+turso db tokens create petroleum-management
+```
+
+Use `turso auth login` if the CLI asks you to sign in. Copy the database URL and the database token into Render's environment settings. Keep the token out of Git and chat. For this deployment the token needs write access so the app can create its schema and save shifts.
+
+### Create the Render Web Service
+
+In the [Render Dashboard](https://dashboard.render.com/), select **New → Web Service** and connect `srslogics/Petroleum-Management` through your GitHub account.
 
 | Field | Value |
 | --- | --- |
@@ -30,30 +44,28 @@ In the [Render Dashboard](https://dashboard.render.com/), select **New → Web S
 | Region | Singapore |
 | Instance Type | Starter |
 | Build Command | `python -m pip install -r requirements.txt && python -m unittest discover -s tests -v` |
-| Start Command | `gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --preload 'app:create_app()'` |
+| Start Command | `gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 'app:create_app()'` |
+| Health Check Path | `/healthz` |
 
-Before selecting **Create Web Service**, open **Advanced**. Set the Health Check Path to `/healthz` and add a **1 GB persistent disk** mounted at `/var/data`. The Starter service and disk are paid resources.
-
-Add these environment variables in the service creation form.
+Add these environment variables before selecting **Create Web Service**.
 
 | Environment variable | Value |
 | --- | --- |
 | `PETROLEUM_HOSTED` | `1` |
-| `PETROLEUM_DB` | `/var/data/petroleum.sqlite3` |
+| `TURSO_DATABASE_URL` | Database URL from `turso db show` |
+| `TURSO_AUTH_TOKEN` | Database token from `turso db tokens create` |
 | `PETROLEUM_OWNER_EMAIL` | Your owner sign-in email |
 | `PETROLEUM_OWNER_PASSWORD` | A unique password of at least 16 characters |
 | `PETROLEUM_MANAGER_EMAIL` | A different email for the station manager |
 | `PETROLEUM_MANAGER_PASSWORD` | A different unique password of at least 16 characters |
 
-To use your own station label, optionally set `PETROLEUM_STATION_NAME` and `PETROLEUM_STATION_CODE` before the first start. Then select **Create Web Service**.
+Turso keeps the records for this deployment, so the Web Service needs no persistent disk. If you already deployed with SQLite and entered real records, back up that database before switching. The Turso setup initializes the configured remote database and does not import existing SQLite records.
 
-Once the service is live, open `/owner` on its HTTPS URL. In **Settings**, enter the station's opening stock and current Petrol and Diesel rates, and confirm the nozzle list. The service starts with one nozzle per fuel (`P-01` and `D-01`), and **Add nozzle** lets you record additional meters. Open `/manager` to enter the first shift's meter readings.
+On first start, the app creates its tables, the two sign-in accounts and the station. To set the station label, optionally add `PETROLEUM_STATION_NAME` and `PETROLEUM_STATION_CODE` before that first start. Changing the account or station environment variables later does not update existing records.
 
-If your dashboard offers **New → Blueprint**, you can instead import `render.yaml` from `main` and supply the two accounts when prompted.
+Open `/owner` on the service's HTTPS URL. In **Settings**, enter the opening stock and current Petrol and Diesel rates and confirm the nozzle list. The initial list includes `P-01` and `D-01`. Open `/manager` to enter the first shift's meter readings.
 
-The hosted database is created on first start at `/var/data/petroleum.sqlite3`. It starts with zero opening stock, unset selling rates and the two accounts you supplied. Account credentials and station labels are read when creating a new database. Changing those environment variables later does not update existing accounts or station labels.
-
-Keep the disk mounted and use one service instance for this SQLite setup. The disk preserves records across restarts and deploys. Render briefly stops the old instance when deploying a service with a disk.
+If your dashboard offers **New → Blueprint**, you can import `render.yaml` from `main` instead of filling the Web Service form.
 
 ## Reconciliation assumptions
 
@@ -70,4 +82,4 @@ Keep the disk mounted and use one service instance for this SQLite setup. The di
 python3 -m unittest discover -s tests -v
 ```
 
-The tests call the WSGI application directly with temporary SQLite databases. They cover two consecutive shifts, carry-forward, rate history, duplicate protection, daily totals, stock, reviews, role and station access, HTTPS session cookies, and persistence across application restarts.
+The tests call the WSGI application directly with temporary databases. Hosted-path tests use a local database through libSQL when installed, or SQLite otherwise. They do not require a Turso Cloud connection. They cover two consecutive shifts, carry-forward, rate history, duplicate protection, daily totals, stock, reviews, role and station access, HTTPS session cookies, and persistence across application restarts.

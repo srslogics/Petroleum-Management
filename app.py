@@ -1,4 +1,4 @@
-"""Petroleum Management WSGI application and SQLite persistence."""
+"""Petroleum Management WSGI application."""
 import argparse
 import hashlib
 import json
@@ -8,7 +8,7 @@ import re
 import secrets
 import sqlite3
 import time
-from contextlib import closing, contextmanager
+from contextlib import closing
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from http import HTTPStatus
@@ -18,6 +18,8 @@ from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs
 from wsgiref.simple_server import WSGIServer, make_server
 from zoneinfo import ZoneInfo
+
+from database import TursoDatabase, open_db, transaction
 
 ROOT = Path(__file__).resolve().parent
 TZ = ZoneInfo("Asia/Kolkata")
@@ -82,13 +84,6 @@ def password_hash(password, salt):
     return hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), 600_000).hex()
 
 
-def open_db(path):
-    db = sqlite3.connect(path, timeout=10)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA foreign_keys = ON")
-    return db
-
-
 def hosted_users(env):
     users = []
     for role in ("manager", "owner"):
@@ -107,21 +102,20 @@ def hosted_users(env):
     return users
 
 
-def initialize(path, hosted=False, env=None):
-    env = os.environ if env is None else env
-    if hosted and not path.parent.is_dir():
-        raise RuntimeError("The database directory is missing. Check the persistent disk mount.")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with closing(open_db(path)) as db, db:
-        db.executescript(SCHEMA)
-        db.execute("BEGIN IMMEDIATE")
+def initialize(database, demo, env):
+    if isinstance(database, Path):
+        database.parent.mkdir(parents=True, exist_ok=True)
+    with closing(open_db(database)) as db, transaction(db, immediate=True):
+        for statement in SCHEMA.split(";"):
+            if statement.strip():
+                db.execute(statement.strip())
         if db.execute("SELECT 1 FROM stations LIMIT 1").fetchone():
-            if hosted and db.execute("SELECT 1 FROM users WHERE email IN (?, ?)",
+            if not demo and db.execute("SELECT 1 FROM users WHERE email IN (?, ?)",
                                      tuple(user[1] for user in DEMO_USERS)).fetchone():
                 raise RuntimeError("Use a fresh hosted database. The configured database contains demo accounts.")
             return
-        users = hosted_users(env) if hosted else DEMO_USERS
-        if hosted:
+        users = DEMO_USERS if demo else hosted_users(env)
+        if not demo:
             station = (env.get("PETROLEUM_STATION_NAME", "Fuel Station"),
                        env.get("PETROLEUM_STATION_CODE", "STATION-01"))
             fuels = [(fuel, 0, 0) for fuel in FUELS]
@@ -129,22 +123,15 @@ def initialize(path, hosted=False, env=None):
             station = ("Horizon Fuel Station", "HZN-01")
             fuels = [("Petrol", 10450, 8000000), ("Diesel", 9230, 10000000)]
         db.execute("INSERT INTO stations VALUES (1, ?, ?)", station)
-        db.executemany("INSERT INTO fuels VALUES (1, ?, ?, ?)", fuels)
-        db.executemany("INSERT INTO nozzles(station_id, code, fuel) VALUES (1, ?, ?)", [
-            ("P-01", "Petrol"), ("D-01", "Diesel"),
-        ])
+        for fuel, rate, stock in fuels:
+            db.execute("INSERT INTO fuels VALUES (1, ?, ?, ?)", (fuel, rate, stock))
+        for code, fuel in (("P-01", "Petrol"), ("D-01", "Diesel")):
+            db.execute("INSERT INTO nozzles(station_id, code, fuel) VALUES (1, ?, ?)", (code, fuel))
         for role, email, name, password in users:
             salt = secrets.token_hex(16)
             db.execute("""INSERT INTO users(station_id, role, email, name, salt, password_hash)
                           VALUES (1, ?, ?, ?, ?, ?)""",
                        (role, email, name, salt, password_hash(password, salt)))
-
-
-@contextmanager
-def write(db):
-    with db:
-        db.execute("BEGIN IMMEDIATE")
-        yield
 
 
 def number(value, places, label, optional=False):
@@ -220,7 +207,7 @@ def manager_state(db, sid):
 def start_shift(db, user, body):
     sid = user["station_id"]
     manual = mapping(body.get("openings", {}), "opening readings")
-    with write(db):
+    with transaction(db, immediate=True):
         state = manager_state(db, sid)
         if state["active"]:
             fail("A shift is already open. Reload to resume it.", 409)
@@ -261,7 +248,7 @@ def report(db, sid, shift_id):
 
 def submit_shift(db, user, shift_id, body):
     sid = user["station_id"]
-    with write(db):
+    with transaction(db, immediate=True):
         row = db.execute("SELECT * FROM shifts WHERE id = ? AND station_id = ?", (shift_id, sid)).fetchone()
         if not row:
             fail("Shift not found.", 404)
@@ -344,7 +331,7 @@ def owner_state(db, sid, selected):
 def review_shift(db, user, shift_id, body):
     sid = user["station_id"]
     review_note = note(body.get("note", ""), "a review note", 500)
-    with write(db):
+    with transaction(db, immediate=True):
         existing = report(db, sid, shift_id)
         if existing["review"]:
             fail("This shift has already been reviewed.", 409)
@@ -353,7 +340,7 @@ def review_shift(db, user, shift_id, body):
 
 
 def save_config(db, sid, body):
-    with write(db):
+    with transaction(db, immediate=True):
         if "rates" in body:
             rates = mapping(body["rates"], "fuel rates")
             for fuel in FUELS:
@@ -367,7 +354,7 @@ def save_config(db, sid, body):
             fuel = nozzle.get("fuel")
             if not code or fuel not in FUELS:
                 fail("Enter a nozzle code and pick Petrol or Diesel.")
-            count = db.execute("SELECT COUNT(*) FROM nozzles WHERE station_id = ?", (sid,)).fetchone()[0]
+            count = db.execute("SELECT COUNT(*) AS total FROM nozzles WHERE station_id = ?", (sid,)).fetchone()["total"]
             if count >= 50:
                 fail("This station has reached the limit of 50 nozzles.", 409)
             try:
@@ -386,10 +373,11 @@ def save_config(db, sid, body):
 
 
 class Request:
-    def __init__(self, environ, database, hosted):
+    def __init__(self, environ, database, hosted, demo):
         self.environ = environ
         self.database = database
         self.hosted = hosted
+        self.demo = demo
 
     def payload(self):
         if self.environ.get("CONTENT_TYPE", "").partition(";")[0].strip().lower() != "application/json":
@@ -449,7 +437,7 @@ class Request:
                     fail("This account cannot sign in to this app.", 403)
                 token = secrets.token_urlsafe(32)
                 expiry = 12 * 60 * 60
-                with write(db):
+                with transaction(db, immediate=True):
                     db.execute("DELETE FROM sessions WHERE expiry <= ?", (int(time.time()),))
                     db.execute("INSERT INTO sessions VALUES (?, ?, ?)",
                                (hashlib.sha256(token.encode()).hexdigest(), user["id"], int(time.time()) + expiry))
@@ -457,14 +445,14 @@ class Request:
             user = self.authenticated(db, role)
             sid = user["station_id"]
             if method == "POST" and route == "/logout":
-                with write(db):
+                with transaction(db, immediate=True):
                     db.execute("DELETE FROM sessions WHERE token_hash = ?", (self.token(role),))
                 return {"ok": True}, self.session_cookie(role, "", 0)
             if method == "GET" and route == "/session":
                 result = user
             elif role == "manager" and route == "/shift":
                 if method == "GET":
-                    with read_snapshot(db):
+                    with transaction(db):
                         result = manager_state(db, sid)
                 else:
                     result = start_shift(db, user, data)
@@ -474,7 +462,7 @@ class Request:
                     selected = date.fromisoformat(day).isoformat()
                 except ValueError:
                     fail("Choose a valid business date.")
-                with read_snapshot(db):
+                with transaction(db):
                     result = owner_state(db, sid, selected)
             elif role == "owner" and method == "POST" and route == "/settings":
                 result = save_config(db, sid, data)
@@ -505,7 +493,7 @@ class Request:
             if method not in ("GET", "HEAD") or (method == "HEAD" and path.startswith("/api/")):
                 fail("Page not found.", 404)
             if path == "/healthz":
-                with closing(sqlite3.connect(f"{self.database.resolve().as_uri()}?mode=ro", uri=True, timeout=1)) as db:
+                with closing(open_db(self.database)) as db:
                     if not db.execute("SELECT 1 FROM stations LIMIT 1").fetchone():
                         fail("Database unavailable.", 503)
                 return 200, b'{"ok":true}', json_type, None
@@ -518,7 +506,7 @@ class Request:
                 fail("Page not found.", 404)
             name, content_type = assets[path]
             body = (ROOT / "static" / name).read_bytes()
-            if name == "index.html" and self.hosted:
+            if name == "index.html" and not self.demo:
                 body = body.replace(b'<meta name="demo-mode" content="true">', b'')
             return 200, body, f"{content_type}; charset=utf-8", None
         except RequestError as error:
@@ -531,14 +519,13 @@ class Request:
 def create_app(database=None, env=None):
     env = os.environ if env is None else env
     hosted = env.get("PETROLEUM_HOSTED") == "1" or env.get("RENDER") == "true"
-    configured_db = env.get("PETROLEUM_DB")
-    if hosted and not (configured_db and Path(configured_db).is_absolute()):
-        raise RuntimeError("Set PETROLEUM_DB to an absolute path on the persistent disk.")
-    database = Path(configured_db if hosted else database or configured_db or ROOT / "data" / "petroleum.sqlite3")
-    initialize(database, hosted, env)
+    turso = TursoDatabase.from_env(env, required=hosted)
+    demo = turso is None
+    database = turso or Path(database or env.get("PETROLEUM_DB") or ROOT / "data" / "petroleum.sqlite3")
+    initialize(database, demo, env)
 
     def application(environ, start_response):
-        status, body, content_type, cookie = Request(environ, database, hosted).dispatch()
+        status, body, content_type, cookie = Request(environ, database, hosted, demo).dispatch()
         headers = [
             ("Content-Type", content_type),
             ("Content-Length", str(len(body))),
@@ -552,14 +539,6 @@ def create_app(database=None, env=None):
         return [b"" if environ["REQUEST_METHOD"] == "HEAD" else body]
 
     return application
-
-
-@contextmanager
-def read_snapshot(db):
-    """Read a consistent snapshot across multiple dashboard queries."""
-    with db:
-        db.execute("BEGIN")
-        yield
 
 
 class LocalServer(ThreadingMixIn, WSGIServer):
