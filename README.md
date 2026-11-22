@@ -105,4 +105,4 @@ The home, owner and manager URLs serve Open Graph and social card metadata direc
 
 ## Direct app links
 
-Share `/owner` with the owner and `/manager` with station managers. `/other` is an alias for the Station Manager App. The root URL opens the Owner App. Each sign-in screen stays within its role.
+Share `/owner` with the owner and `/manager` with station managers. The root URL opens the Owner App. Each sign-in screen stays within its role.

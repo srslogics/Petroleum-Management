@@ -701,14 +701,14 @@ class Request:
                 if content_type.startswith("text/"):
                     content_type += "; charset=utf-8"
                 return 200, body, content_type, None
-            if path in ("/", "/manager", "/other", "/owner"):
+            if path in ("/", "/manager", "/owner"):
                 body = (ROOT / "static" / "index.html").read_bytes()
                 titles = {
                     "/": ("Tuljai Realtors & Petroleum", "Petrol and Diesel station management for Tuljai Realtors & Petroleum."),
                     "/owner": ("Tuljai Petroleum | Owner App", "View daily fuel sales, payments, stock and shift reports."),
                     "/manager": ("Tuljai Petroleum | Station Manager App", "Manage shift readings, fuel deliveries, collections and cash reconciliation."),
                 }
-                title, description = titles["/manager" if path == "/other" else path]
+                title, description = titles[path]
                 preview = self.public_url + "/tuljai-logo.jpg?v=" + asset_version(
                     (ROOT / "static" / "tuljai-logo.jpg").read_bytes())
                 metadata = {
@@ -717,7 +717,7 @@ class Request:
                 }
                 for placeholder, value in metadata.items():
                     body = body.replace(placeholder.encode(), escape(value, quote=True).encode())
-                if path in ("/manager", "/other"):
+                if path == "/manager":
                     body = body.replace(b'"/owner.webmanifest"', b'"/manager.webmanifest"')
                 if not self.demo:
                     body = body.replace(b'<meta name="demo-mode" content="true">', b'')

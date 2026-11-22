@@ -4,7 +4,7 @@ const root = document.querySelector("#app");
 const appName = "Tuljai Petroleum";
 const clientName = "Tuljai Realtors & Petroleum";
 const brandLogo = document.querySelector('meta[name="brand-logo"]')?.content || "/tuljai-logo.jpg";
-const role = { "/": "owner", "/manager": "manager", "/other": "manager", "/owner": "owner" }[location.pathname];
+const role = { "/": "owner", "/manager": "manager", "/owner": "owner" }[location.pathname];
 const fuelNames = ["Petrol", "Diesel"];
 const methodNames = { cash: "Cash", upi: "UPI", card: "Card", credit: "Credit" };
 const rupees = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" });
