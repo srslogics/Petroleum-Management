@@ -66,7 +66,7 @@ function showLogin(message = "") {
     <main class="login card">
       <p class="eyebrow">${roleTitle}</p><h1>Sign in</h1>
       <form id="login">
-        <label>Email<input required name="email" type="email" autocomplete="username"></label>
+        <label>Mobile number or email<input required name="identifier" autocomplete="username" autocapitalize="none" maxlength="254"></label>
         <label>Password<input required name="password" type="password" autocomplete="current-password"></label>
         <div class="form-error" role="alert">${safe(message)}</div>
         <button class="primary">Sign in</button>
@@ -77,7 +77,7 @@ function showLogin(message = "") {
   const login = document.querySelector("#login");
   const demoButton = document.querySelector("#demo");
   demoButton?.addEventListener("click", () => {
-    login.elements.email.value = role + "@demo.local";
+    login.elements.identifier.value = role + "@demo.local";
     login.elements.password.value = role === "owner" ? "OwnerDemo123!" : "ManagerDemo123!";
     login.querySelector("button").focus();
   });
@@ -90,7 +90,7 @@ function showLogin(message = "") {
 
 function shell(content) {
   const ownerNav = role === "owner"
-    ? '<button class="nav-button" id="home" type="button">Dashboard</button><button class="nav-button" id="settings" type="button">Settings</button>'
+    ? '<button class="nav-button" id="home" type="button">Dashboard</button><button class="nav-button" id="settings" type="button">Settings</button><button class="nav-button" id="team" type="button">Team</button>'
     : '<span class="nav-label">Shift closing</span>';
   root.innerHTML = `<header class="top"><div class="top-inner">${brand()}
     <span class="app-name">${roleTitle}</span>
@@ -111,6 +111,7 @@ function shell(content) {
   if (role === "owner") {
     listen("home", showHome);
     listen("settings", openSettings);
+    listen("team", openTeam);
   }
 }
 
@@ -433,6 +434,38 @@ function showReport(shift) {
   if (!shift.review) {
     bindForm("review", async form => showReport(await api("/shifts/" + shift.id + "/review", fields(form))));
   }
+}
+
+async function openTeam() {
+  showTeam(await api("/managers"));
+}
+
+function showTeam(managers, added = false) {
+  shell(`${heading("Station access", "Team")}
+    ${added ? '<p class="success" role="status">Manager account created. Share the sign-in details privately.</p>' : ""}
+    <section class="card">
+      <h2>Station managers</h2>
+      ${managers.length ? `<dl class="key-values">${managers.map(manager =>
+        `<div><dt>${safe(manager.name)}</dt><dd>${safe(manager.login_id)}</dd></div>`).join("")}</dl>`
+        : '<p>No manager accounts yet.</p>'}
+    </section>
+    <section class="card">
+      <h2>Add a station manager</h2>
+      <form id="add-manager">
+        <div class="field-grid">
+          <label>Full name<input name="name" required maxlength="80" autocomplete="off"></label>
+          <label>Mobile number<input name="phone" required type="tel" maxlength="24" placeholder="+91" autocomplete="off"></label>
+        </div>
+        <label>Password<input name="password" type="password" required minlength="16" maxlength="200"
+          autocomplete="new-password" aria-describedby="manager-password-help"></label>
+        <small id="manager-password-help">Use a unique password of at least 16 characters.</small>
+        ${errorbox}<button class="primary">Create manager account</button>
+      </form>
+    </section>`);
+  bindForm("add-manager", async form => {
+    const manager = await api("/managers", fields(form));
+    showTeam([...managers, manager], true);
+  });
 }
 
 async function openSettings() {

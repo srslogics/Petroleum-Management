@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS stations (
 );
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY, station_id INTEGER NOT NULL REFERENCES stations(id),
-    role TEXT NOT NULL CHECK(role IN ('manager','owner')), email TEXT NOT NULL UNIQUE,
+    role TEXT NOT NULL CHECK(role IN ('manager','owner')), login_id TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL, salt TEXT NOT NULL, password_hash TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -84,22 +84,32 @@ def password_hash(password, salt):
     return hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), 600_000).hex()
 
 
-def hosted_users(env):
-    users = []
-    for role in ("manager", "owner"):
-        prefix = f"PETROLEUM_{role.upper()}"
-        email = env.get(prefix + "_EMAIL", "").strip().lower()
-        password = env.get(prefix + "_PASSWORD", "")
-        if not re.fullmatch(r"[^\s@]+@[^\s@]+", email) or len(email) > 254:
-            raise RuntimeError(f"Set {prefix}_EMAIL to a valid email address.")
-        if any(email == demo[1] for demo in DEMO_USERS):
-            raise RuntimeError(f"Use a non-demo email for {prefix}_EMAIL.")
-        if not 16 <= len(password) <= 200 or any(password == demo[3] for demo in DEMO_USERS):
-            raise RuntimeError(f"Set {prefix}_PASSWORD to a unique password of 16–200 characters.")
-        users.append((role, email, "Station Manager" if role == "manager" else "Owner", password))
-    if users[0][1] == users[1][1] or users[0][3] == users[1][3]:
-        raise RuntimeError("Use a different email and password for each role.")
-    return users
+def indian_mobile(value):
+    if not isinstance(value, str):
+        return None
+    number = re.sub(r"[ -]", "", value.strip())
+    match = re.fullmatch(r"(?:(?:\+?91))?([6-9][0-9]{9})", number)
+    return "+91" + match[1] if match else None
+
+
+def valid_new_password(password):
+    return (isinstance(password, str) and 16 <= len(password) <= 200
+            and password not in (account[3] for account in DEMO_USERS))
+
+
+def initial_owner(env):
+    phone = indian_mobile(env.get("PETROLEUM_OWNER_PHONE"))
+    if not phone:
+        raise RuntimeError("Set PETROLEUM_OWNER_PHONE to the owner's Indian mobile number.")
+    password = env.get("PETROLEUM_OWNER_PASSWORD")
+    if not valid_new_password(password):
+        raise RuntimeError("Set PETROLEUM_OWNER_PASSWORD to a unique password of 16–200 characters.")
+    return "owner", phone, "Owner", password
+
+
+def insert_user(db, station_id, role, login_id, name, salt, digest):
+    db.execute("""INSERT INTO users(station_id, role, login_id, name, salt, password_hash)
+                  VALUES (?, ?, ?, ?, ?, ?)""", (station_id, role, login_id, name, salt, digest))
 
 
 def initialize(database, demo, env):
@@ -109,12 +119,15 @@ def initialize(database, demo, env):
         for statement in SCHEMA.split(";"):
             if statement.strip():
                 db.execute(statement.strip())
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(users)")}
+        if "email" in columns and "login_id" not in columns:
+            db.execute("ALTER TABLE users RENAME COLUMN email TO login_id")
         if db.execute("SELECT 1 FROM stations LIMIT 1").fetchone():
-            if not demo and db.execute("SELECT 1 FROM users WHERE email IN (?, ?)",
+            if not demo and db.execute("SELECT 1 FROM users WHERE login_id IN (?, ?)",
                                      tuple(user[1] for user in DEMO_USERS)).fetchone():
                 raise RuntimeError("Use a fresh hosted database. The configured database contains demo accounts.")
             return
-        users = DEMO_USERS if demo else hosted_users(env)
+        users = DEMO_USERS if demo else (initial_owner(env),)
         if not demo:
             station = (env.get("PETROLEUM_STATION_NAME", "Fuel Station"),
                        env.get("PETROLEUM_STATION_CODE", "STATION-01"))
@@ -127,11 +140,9 @@ def initialize(database, demo, env):
             db.execute("INSERT INTO fuels VALUES (1, ?, ?, ?)", (fuel, rate, stock))
         for code, fuel in (("P-01", "Petrol"), ("D-01", "Diesel")):
             db.execute("INSERT INTO nozzles(station_id, code, fuel) VALUES (1, ?, ?)", (code, fuel))
-        for role, email, name, password in users:
+        for role, login_id, name, password in users:
             salt = secrets.token_hex(16)
-            db.execute("""INSERT INTO users(station_id, role, email, name, salt, password_hash)
-                          VALUES (1, ?, ?, ?, ?, ?)""",
-                       (role, email, name, salt, password_hash(password, salt)))
+            insert_user(db, 1, role, login_id, name, salt, password_hash(password, salt))
 
 
 def number(value, places, label, optional=False):
@@ -372,6 +383,32 @@ def save_config(db, sid, body):
         return config(db, sid)
 
 
+def list_managers(db, station_id):
+    return [dict(row) for row in db.execute(
+        "SELECT name, login_id FROM users WHERE station_id = ? AND role = 'manager' ORDER BY id",
+        (station_id,),
+    )]
+
+
+def create_manager(db, station_id, data):
+    name = note(data.get("name", ""), "the manager's name", 80)
+    if not name:
+        fail("Enter the manager's name.")
+    phone = indian_mobile(data.get("phone"))
+    if not phone:
+        fail("Enter a valid Indian mobile number.")
+    password = data.get("password")
+    if not valid_new_password(password):
+        fail("Choose a unique password of 16–200 characters.")
+    salt = secrets.token_hex(16)
+    digest = password_hash(password, salt)
+    with transaction(db, immediate=True):
+        if db.execute("SELECT 1 FROM users WHERE login_id = ?", (phone,)).fetchone():
+            fail("That mobile number is already registered.", 409)
+        insert_user(db, station_id, "manager", phone, name, salt, digest)
+    return {"name": name, "login_id": phone}
+
+
 class Request:
     def __init__(self, environ, database, hosted, demo):
         self.environ = environ
@@ -426,13 +463,15 @@ class Request:
         data = self.payload() if method == "POST" else None
         with closing(open_db(self.database)) as db:
             if method == "POST" and route == "/login":
-                email = note(data.get("email", ""), "an email", 254).lower()
+                identifier = note(data.get("identifier", data.get("email", "")), "a mobile number or email", 254).lower()
+                login_id = indian_mobile(identifier) or identifier
                 password = data.get("password", "")
                 if not isinstance(password, str) or len(password) > 200:
                     fail("Enter a password of up to 200 characters.")
-                user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-                if not user or not secrets.compare_digest(password_hash(password, user["salt"]), user["password_hash"]):
-                    fail("Email or password is incorrect.", 401)
+                user = db.execute("SELECT * FROM users WHERE login_id = ?", (login_id,)).fetchone()
+                digest = password_hash(password, user["salt"] if user else "0" * 32)
+                if not user or not secrets.compare_digest(digest, user["password_hash"]):
+                    fail("Sign-in details are incorrect.", 401)
                 if user["role"] != role:
                     fail("This account cannot sign in to this app.", 403)
                 token = secrets.token_urlsafe(32)
@@ -464,6 +503,8 @@ class Request:
                     fail("Choose a valid business date.")
                 with transaction(db):
                     result = owner_state(db, sid, selected)
+            elif role == "owner" and route == "/managers":
+                result = list_managers(db, sid) if method == "GET" else create_manager(db, sid, data)
             elif role == "owner" and method == "POST" and route == "/settings":
                 result = save_config(db, sid, data)
             else:

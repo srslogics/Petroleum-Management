@@ -54,16 +54,14 @@ Add these environment variables before selecting **Create Web Service**.
 | `PETROLEUM_HOSTED` | `1` |
 | `TURSO_DATABASE_URL` | Database URL from `turso db show` |
 | `TURSO_AUTH_TOKEN` | Database token from `turso db tokens create` |
-| `PETROLEUM_OWNER_EMAIL` | Your owner sign-in email |
+| `PETROLEUM_OWNER_PHONE` | The owner’s Indian mobile number, with or without `+91` |
 | `PETROLEUM_OWNER_PASSWORD` | A unique password of at least 16 characters |
-| `PETROLEUM_MANAGER_EMAIL` | A different email for the station manager |
-| `PETROLEUM_MANAGER_PASSWORD` | A different unique password of at least 16 characters |
 
 Turso keeps the records for this deployment, so the Web Service needs no persistent disk. If you already deployed with SQLite and entered real records, back up that database before switching. The Turso setup initializes the configured remote database and does not import existing SQLite records.
 
-On first start, the app creates its tables, the two sign-in accounts and the station. To set the station label, optionally add `PETROLEUM_STATION_NAME` and `PETROLEUM_STATION_CODE` before that first start. Changing the account or station environment variables later does not update existing records.
+On first start, the app creates its tables, the owner account and the station. To set the station label, optionally add `PETROLEUM_STATION_NAME` and `PETROLEUM_STATION_CODE` before that first start. Changing the owner sign-in or station environment variables later does not update existing records. Existing accounts can continue to sign in with their original email addresses.
 
-Open `/owner` on the service's HTTPS URL. In **Settings**, enter the opening stock and current Petrol and Diesel rates and confirm the nozzle list. The initial list includes `P-01` and `D-01`. Open `/manager` to enter the first shift's meter readings.
+Open `/owner` on the service's HTTPS URL. In **Settings**, enter the opening stock and current Petrol and Diesel rates and confirm the nozzle list. The initial list includes `P-01` and `D-01`. In **Team → Add a station manager**, enter the manager’s name, mobile number and password. Share the sign-in details privately. The manager can then sign in at `/manager` to enter the first shift’s meter readings.
 
 If your dashboard offers **New → Blueprint**, you can import `render.yaml` from `main` instead of filling the Web Service form.
 

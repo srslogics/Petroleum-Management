@@ -15,11 +15,7 @@ services:
         sync: false
       - key: TURSO_AUTH_TOKEN
         sync: false
-      - key: PETROLEUM_OWNER_EMAIL
+      - key: PETROLEUM_OWNER_PHONE
         sync: false
       - key: PETROLEUM_OWNER_PASSWORD
-        sync: false
-      - key: PETROLEUM_MANAGER_EMAIL
-        sync: false
-      - key: PETROLEUM_MANAGER_PASSWORD
         sync: false

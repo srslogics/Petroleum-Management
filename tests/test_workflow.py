@@ -149,6 +149,12 @@ class WorkflowTest(unittest.TestCase):
         self.assertIsNotNone(dashboard["shifts"][1]["reviewed_at"])
         self.assertEqual(self.expect(200, "/api/owner/dashboard?date=2026-11-21")["shifts"], [])
 
+    def test_original_email_accounts_survive_schema_update(self):
+        with closing(open_db(self.database)) as db:
+            db.execute("ALTER TABLE users RENAME COLUMN login_id TO email")
+        self.browser = Browser(create_app(self.database, env={}))
+        self.login()
+
     def test_station_and_role_access(self):
         self.login()
         self.expect(403, "/api/owner/dashboard",
@@ -198,13 +204,12 @@ class HostedTest(unittest.TestCase):
 
     def test_configure_hosted_station_and_reopen_database(self):
         env = self.env.copy()
-        with self.assertRaisesRegex(RuntimeError, "PETROLEUM_MANAGER_EMAIL"):
+        with self.assertRaisesRegex(RuntimeError, "PETROLEUM_OWNER_PHONE"):
             create_app(env=env)
-        owner = {"email": "owner@example.test", "password": "Hosted-owner-test-password"}
-        manager = {"email": "manager@example.test", "password": "Hosted-manager-test-password"}
+        owner = {"identifier": "9000000001", "password": "Hosted-owner-test-password"}
+        manager = {"identifier": "9000000002", "password": "Hosted-manager-test-password"}
         env.update({
-            "PETROLEUM_OWNER_EMAIL": owner["email"], "PETROLEUM_OWNER_PASSWORD": owner["password"],
-            "PETROLEUM_MANAGER_EMAIL": manager["email"], "PETROLEUM_MANAGER_PASSWORD": manager["password"],
+            "PETROLEUM_OWNER_PHONE": "+91 90000 00001", "PETROLEUM_OWNER_PASSWORD": owner["password"],
         })
         browser = Browser(create_app(env=env), "pump.onrender.com", "https://pump.onrender.com")
         self.assertEqual(browser.request("/healthz"), (200, {"ok": True}))
@@ -213,7 +218,17 @@ class HostedTest(unittest.TestCase):
         self.assertEqual(browser.request("/api/owner/login", owner, origin="http://pump.onrender.com")[0], 403)
         self.assertEqual(browser.request("/api/owner/login", owner)[0], 200)
         self.assertIn("; Secure", browser.set_cookies["owner"])
+        self.assertEqual(browser.request("/api/owner/managers"), (200, []))
+        self.assertEqual(browser.request("/api/manager/login", manager)[0], 401)
+        new_manager = {"name": "Test Manager", "phone": "+91-90000-00002", "password": manager["password"]}
+        status, created = browser.request("/api/owner/managers", new_manager)
+        self.assertEqual((status, created), (200, {"name": "Test Manager", "login_id": "+919000000002"}))
+        self.assertEqual(browser.request("/api/owner/managers", new_manager | {"phone": manager["identifier"]})[0], 409)
+        self.assertEqual(browser.request("/api/owner/managers", new_manager | {"phone": owner["identifier"]})[0], 409)
         self.assertEqual(browser.request("/api/manager/login", manager)[0], 200)
+        self.assertEqual(browser.request("/api/manager/managers", new_manager)[0], 404)
+        self.assertEqual(browser.request("/api/owner/managers", new_manager,
+                                         cookie=browser.cookies["manager"].replace("pm_manager", "pm_owner"))[0], 403)
         openings = {"openings": {"1": "100", "2": "200"}}
         self.assertEqual(browser.request("/api/manager/shift", openings)[0], 409)
         self.assertEqual(browser.request("/api/owner/settings", {"rates": {"Petrol": "105", "Diesel": "90"}})[0], 200)
