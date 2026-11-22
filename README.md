@@ -83,7 +83,7 @@ If your dashboard offers **New → Blueprint**, you can import `render.yaml` fro
 - Expected cash equals cash collections minus till expenses. Cash difference equals actual counted cash minus expected cash. The shift starts with zero opening cash float for this version.
 - Collections include cash, UPI, card and credit. Enter credit sales in the credit category. Collections difference equals total recorded collections and credit minus metered sales. Differences are saved for review, including shortages and overages.
 - Enter one delivery total and an optional physical closing reading for each fuel per shift. Calculated stock equals the starting balance plus submitted deliveries minus submitted metered sales. The latest physical reading is shown separately and does not adjust the calculated balance.
-- Submitting locks a shift's figures. An owner's review is recorded separately and saved once with their name, the timestamp and an optional note. Only the shift opening and submitted report are persisted. Closing form inputs need to be re-entered if the page is refreshed before submission.
+- Submitting locks a shift's figures. An owner can correct the latest report with a reason while no later shift, bank reconciliation, credit allocation or customer repayment depends on it. Original figures and correction history are retained, and the previous review is cleared. Closing inputs are saved on submission and need to be re-entered if the manager refreshes before submitting.
 
 ## Verify the workflow
 
@@ -92,6 +92,18 @@ python3 -m unittest discover -s tests -v
 ```
 
 The tests call the WSGI application directly with temporary databases. Hosted-path tests exercise the Turso HTTP protocol against a local SQLite fixture. They do not require a Turso Cloud connection. They cover two consecutive shifts, carry-forward, rate history, duplicate protection, daily totals, stock, reviews, role and station access, HTTPS session cookies, and persistence across application restarts.
+
+### Verify owner workflows in Chromium
+
+Browser regression tests require Node.js 20+ as a development tool; the app still runs without Node.js or a build step.
+
+```sh
+npm ci
+npx playwright install chromium
+npm test
+```
+
+The test starts a local server on an available port with a temporary SQLite database and demo accounts, then removes it after the run. It covers owner credit allocation, repayments, settlements, deposits, correction requests and audited corrections, account deactivation, exception follow-up, phone layouts. Set `PYTHON` if your Python executable is named differently from `python3`.
 
 ## Install on a phone
 
@@ -112,3 +124,37 @@ Share `/owner` with the owner and `/manager` with station managers. The root URL
 In an open shift, the manager can add payment transactions or settlement batches, individual fuel deliveries, and till expenses. Payment entries include method, amount, customer/account, reference and notes. Credit requires a customer name. Deliveries include fuel, litres, supplier/tanker and invoice/challan reference. Expenses include amount, payee, reference and description. Physical stock measurements and handover notes are entered at closing.
 
 If detailed entries exist for a payment method or fuel, the server derives that total from those entries. Otherwise the direct total is used. Enter all entries for a method when using that detail list. Expense entries replace the direct expense total. All submitted entries and handover notes appear in the owner's shift report, daily report and CSV export. Closing form entries are saved on submission.
+
+## Owner business controls
+
+The owner navigation includes **Money**, **Operations** and **Exceptions** alongside the existing daily reports, settings and team screens. The new tables are created automatically on application startup for both SQLite and Turso. Existing shifts, accounts and opening stock are retained; tank capacities start unconfigured.
+
+### Customer credit and repayments
+
+In **Money**, named credit entries from submitted shifts create customer balances. Customer names are matched without letter case; managers should consistently use the same account name. Use **Add a customer or set a payment due date** to set an account-level due date. Each customer has a transaction statement and CSV download. Outstanding balances past their due date appear in Exceptions.
+
+Credit entered only as a shift total remains visibly **unallocated**. Assign that credit to one or more customers in Money, within the remaining balance, using unique allocation references. Allocations do not change the shift's sales or collections.
+
+Record repayments against a customer's outstanding balance using a unique receipt reference. A confirmed bank receipt reduces the balance immediately. Cash received also reduces the customer balance but remains awaiting deposit. These repayments are separate from fuel sales: do not enter them again as a shift's fuel collection or include the same repayment cash in its closing count. Overpayments, future receipt dates and duplicate references are rejected.
+
+### Bank reconciliation and cash deposits
+
+Each submitted shift creates sources for UPI, card and actual counted cash. Record the net amount received by the bank plus any settlement fee for digital payments, or the deposited amount for cash. Partial settlements remain pending; a completed receipt plus fees cannot exceed its source balance. Cash repayments create their own deposit source. Bank records require a date and a unique bank/deposit reference. This is manual reconciliation against your bank evidence; there is no automatic bank, UPI or card-provider connection.
+
+Money record history retains repayments, deposits and settlements with who recorded them and when. Void a mistaken entry with a reason, then enter a replacement with a new reference. Voiding restores the related outstanding balance without deleting the original. Void a cash repayment's linked deposit first. Prior financial records continue to prevent rewriting their underlying shift, including after a void.
+
+### Shift oversight and corrections
+
+The overview and Operations show the current open shift, opener, opening time/readings and elapsed hours. A shift open for 12 hours or more is flagged overdue. Use Refresh status for the latest snapshot; closing inputs are visible only after submission.
+
+From a submitted shift, request a correction or clarification with a reason. Managers see **Owner requests**, send the proposed figures and explanation, and the owner records the resolution. Each request allows one manager response and one owner resolution; create a new request for further discussion.
+
+**Correct report figures** lets the owner amend the latest submitted shift before dependent records exist. It preserves the original submission attribution, stores complete before/after reports with the correction reason and owner, updates derived totals, and requires a fresh review. A later shift, a bank record for that shift, allocated credit for it, or any customer repayment blocks rewriting figures. Resolve older or reconciled reports through a documented clarification; this version does not cascade meter/stock corrections through later shifts.
+
+### Team, exceptions and tanks
+
+In **Team**, the owner can edit a manager's name/mobile number, reset their password, deactivate/reactivate their account or end their sessions. Every account change ends existing sessions. Deactivated accounts cannot sign in; their historical shifts are retained. These controls cannot modify owner accounts.
+
+**Exceptions** spans all business dates: cash and collection differences, physical/book stock differences, pending reviews, overdue shifts, correction requests, unallocated credit, overdue customers, pending settlements/deposits and configured tank warnings. Acknowledge an issue with a follow-up note. Acknowledgement does not clear the actual discrepancy; a changed amount or status brings the issue back to attention. Exceptions whose underlying condition is fixed disappear from the active list.
+
+In **Operations**, configure the usable combined tank capacity and low stock threshold for Petrol and Diesel. The overview shows percentages only after configuration, warns at the configured threshold and flags stock above capacity. These use calculated stock through submitted shifts, rather than live sensor readings.

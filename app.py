@@ -66,6 +66,59 @@ CREATE TABLE IF NOT EXISTS shifts (
 CREATE UNIQUE INDEX IF NOT EXISTS one_open_shift ON shifts(station_id) WHERE submitted_at IS NULL;
 CREATE INDEX IF NOT EXISTS submitted_shifts_by_date ON shifts(station_id, business_date, id)
     WHERE submitted_at IS NOT NULL;
+CREATE TABLE IF NOT EXISTS manager_controls (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id), disabled INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS tanks (
+    station_id INTEGER NOT NULL REFERENCES stations(id), fuel TEXT NOT NULL,
+    capacity INTEGER NOT NULL, low_level INTEGER NOT NULL, PRIMARY KEY(station_id, fuel)
+);
+CREATE TABLE IF NOT EXISTS customers (
+    station_id INTEGER NOT NULL REFERENCES stations(id), customer_key TEXT NOT NULL,
+    name TEXT NOT NULL, due_date TEXT NOT NULL DEFAULT '', PRIMARY KEY(station_id, customer_key)
+);
+CREATE TABLE IF NOT EXISTS credit_allocations (
+    id INTEGER PRIMARY KEY, station_id INTEGER NOT NULL REFERENCES stations(id), shift_id INTEGER NOT NULL REFERENCES shifts(id),
+    name TEXT NOT NULL, amount INTEGER NOT NULL, reference TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL,
+    UNIQUE(station_id, reference)
+);
+CREATE TABLE IF NOT EXISTS repayments (
+    id INTEGER PRIMARY KEY, station_id INTEGER NOT NULL REFERENCES stations(id), customer_key TEXT NOT NULL,
+    amount INTEGER NOT NULL, method TEXT NOT NULL, paid_on TEXT NOT NULL, reference TEXT NOT NULL,
+    note TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL,
+    UNIQUE(station_id, reference)
+);
+CREATE TABLE IF NOT EXISTS record_voids (
+    station_id INTEGER NOT NULL REFERENCES stations(id), record_type TEXT NOT NULL, record_id INTEGER NOT NULL,
+    reason TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL,
+    PRIMARY KEY(station_id, record_type, record_id)
+);
+CREATE TABLE IF NOT EXISTS bank_records (
+    id INTEGER PRIMARY KEY, station_id INTEGER NOT NULL REFERENCES stations(id), source TEXT NOT NULL,
+    method TEXT NOT NULL, amount INTEGER NOT NULL, fees INTEGER NOT NULL, bank_date TEXT NOT NULL,
+    reference TEXT NOT NULL, note TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL,
+    UNIQUE(station_id, reference)
+);
+CREATE TABLE IF NOT EXISTS corrections (
+    id INTEGER PRIMARY KEY, station_id INTEGER NOT NULL REFERENCES stations(id), shift_id INTEGER NOT NULL REFERENCES shifts(id),
+    requested_by INTEGER NOT NULL REFERENCES users(id), requested_at TEXT NOT NULL, reason TEXT NOT NULL,
+    response TEXT NOT NULL DEFAULT '', responded_by INTEGER REFERENCES users(id), responded_at TEXT,
+    resolved_at TEXT, resolved_by INTEGER REFERENCES users(id), resolution TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS shift_revisions (
+    id INTEGER PRIMARY KEY, station_id INTEGER NOT NULL REFERENCES stations(id), shift_id INTEGER NOT NULL REFERENCES shifts(id),
+    user_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, reason TEXT NOT NULL,
+    original_json TEXT NOT NULL, replacement_json TEXT NOT NULL, original_review TEXT NOT NULL DEFAULT 'null'
+);
+CREATE TABLE IF NOT EXISTS exception_acknowledgements (
+    station_id INTEGER NOT NULL REFERENCES stations(id), exception_key TEXT NOT NULL, signature TEXT NOT NULL,
+    note TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL,
+    PRIMARY KEY(station_id, exception_key)
+);
+CREATE INDEX IF NOT EXISTS repayments_by_station ON repayments(station_id, customer_key);
+CREATE INDEX IF NOT EXISTS bank_records_by_source ON bank_records(station_id, source, method);
+CREATE INDEX IF NOT EXISTS corrections_by_station ON corrections(station_id, shift_id);
+CREATE INDEX IF NOT EXISTS revisions_by_station ON shift_revisions(station_id, shift_id);
 CREATE TABLE IF NOT EXISTS reviews (
     shift_id INTEGER PRIMARY KEY REFERENCES shifts(id), user_id INTEGER NOT NULL REFERENCES users(id),
     reviewed_at TEXT NOT NULL, note TEXT NOT NULL
@@ -77,6 +130,7 @@ STATIC_FILES = {
     "/app.js": "text/javascript", "/styles.css": "text/css", "/daily-report.js": "text/javascript",
     "/tuljai-logo.jpg": "image/jpeg",
     "/manager-entries.js": "text/javascript",
+    "/owner-business.js": "text/javascript",
     "/pwa.js": "text/javascript", "/sw.js": "text/javascript", "/offline.html": "text/html",
     "/offline.css": "text/css", "/owner.webmanifest": "application/manifest+json",
     "/manager.webmanifest": "application/manifest+json",
@@ -317,7 +371,11 @@ def report(db, sid, shift_id):
     if row["reviewed_at"]:
         review = {key: row[key] for key in ("reviewed_at", "review_note", "reviewer")}
     return {**shift_identity(row), **json.loads(row["report_json"]),
-            "submitted_at": row["submitted_at"], "submitter": row["submitter"], "review": review}
+            "submitted_at": row["submitted_at"], "submitter": row["submitter"], "review": review,
+            "version": hashlib.sha256(row["report_json"].encode()).hexdigest(),
+            "corrections": correction_list(db, sid, shift_id),
+            "revisions": [dict(item) for item in db.execute(
+                "SELECT r.*, u.name AS actor FROM shift_revisions r JOIN users u ON u.id = r.user_id WHERE r.station_id = ? AND r.shift_id = ? ORDER BY r.id", (sid, shift_id))]}
 
 
 def shift_entries(body):
@@ -354,14 +412,29 @@ def shift_entries(body):
     return entries
 
 
-def submit_shift(db, user, shift_id, body):
+def submit_shift(db, user, shift_id, body, *, revision=False):
     sid = user["station_id"]
     with transaction(db, immediate=True):
         row = db.execute("SELECT * FROM shifts WHERE id = ? AND station_id = ?", (shift_id, sid)).fetchone()
         if not row:
             fail("Shift not found.", 404)
-        if row["submitted_at"]:
+        if row["submitted_at"] and not revision:
             fail("This shift has already been submitted.", 409)
+        if revision:
+            if not row["submitted_at"]:
+                fail("Only a submitted shift can be corrected.", 409)
+            if db.execute("SELECT 1 FROM shifts WHERE station_id = ? AND id > ? LIMIT 1", (sid, shift_id)).fetchone():
+                fail("A later shift already uses these readings. Resolve through a documented clarification; historical figures cannot be rewritten.", 409)
+            if db.execute("SELECT 1 FROM bank_records WHERE station_id = ? AND source = ?", (sid, f"shift:{shift_id}")).fetchone():
+                fail("This shift has bank reconciliation records. Its figures cannot be rewritten.", 409)
+            if db.execute("SELECT 1 FROM credit_allocations WHERE station_id = ? AND shift_id = ?", (sid, shift_id)).fetchone():
+                fail("This shift's credit has been allocated to customers. Its figures cannot be rewritten.", 409)
+            if db.execute("SELECT 1 FROM repayments WHERE station_id = ? LIMIT 1", (sid,)).fetchone():
+                fail("Customer repayments already exist. Resolve with a documented clarification to preserve customer balances.", 409)
+            reason = required_note(body.get("correction_reason"), "a correction reason", 500)
+            version = required_note(body.get("expected_version"), "the report version; reopen the report to correct it", 64)
+            if version != hashlib.sha256(row["report_json"].encode()).hexdigest():
+                fail("This report changed while you were editing. Reopen it before correcting the figures.", 409)
         mapping(body.get("entries", {}), "shift entries", ("payments", "deliveries", "expenses"))
         entries = shift_entries(body)
         draft = json.loads(row["opening_json"])
@@ -407,8 +480,17 @@ def submit_shift(db, user, shift_id, body):
             "expense_note": note(body.get("expense_note", ""), "an expense note"),
             "shift_note": note(body.get("shift_note", ""), "shift notes", 1000), "entries": entries,
         }
-        db.execute("""UPDATE shifts SET submitted_at = ?, submitted_by = ?, report_json = ? WHERE id = ?""",
-                   (now(), user["id"], json.dumps(payload), shift_id))
+        if revision:
+            prior_review = db.execute("SELECT * FROM reviews WHERE shift_id = ?", (shift_id,)).fetchone()
+            db.execute("""INSERT INTO shift_revisions(station_id, shift_id, user_id, created_at, reason, original_json, replacement_json, original_review)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (sid, shift_id, user["id"], now(), reason, row["report_json"], json.dumps(payload),
+                        json.dumps(dict(prior_review) if prior_review else None)))
+            db.execute("UPDATE shifts SET report_json = ? WHERE id = ?", (json.dumps(payload), shift_id))
+            db.execute("DELETE FROM reviews WHERE shift_id = ?", (shift_id,))
+        else:
+            db.execute("""UPDATE shifts SET submitted_at = ?, submitted_by = ?, report_json = ? WHERE id = ?""",
+                       (now(), user["id"], json.dumps(payload), shift_id))
         return report(db, sid, shift_id)
 
 
@@ -579,7 +661,9 @@ def save_config(db, sid, body):
 
 def list_managers(db, station_id):
     return [dict(row) for row in db.execute(
-        "SELECT name, login_id FROM users WHERE station_id = ? AND role = 'manager' ORDER BY id",
+        """SELECT u.id, u.name, u.login_id, COALESCE(mc.disabled, 0) AS disabled FROM users u
+        LEFT JOIN manager_controls mc ON mc.user_id = u.id
+        WHERE u.station_id = ? AND u.role = 'manager' ORDER BY u.id""",
         (station_id,),
     )]
 
@@ -601,6 +685,316 @@ def create_manager(db, station_id, data):
             fail("That mobile number is already registered.", 409)
         insert_user(db, station_id, "manager", phone, name, salt, digest)
     return {"name": name, "login_id": phone}
+
+
+def required_note(value, label, limit=150):
+    value = note(value, label, limit)
+    if not value:
+        fail(f"Enter {label}.")
+    return value
+
+
+def business_date(value, label="a date"):
+    try:
+        return date.fromisoformat(value).isoformat()
+    except (ValueError, TypeError):
+        fail(f"Enter {label} as YYYY-MM-DD.")
+
+
+def correction_list(db, sid, shift_id=None):
+    return [dict(row) for row in db.execute("""SELECT c.*, u.name AS requester, m.name AS responder
+        FROM corrections c JOIN users u ON u.id = c.requested_by LEFT JOIN users m ON m.id = c.responded_by
+        WHERE c.station_id = ? AND (? IS NULL OR c.shift_id = ?) ORDER BY c.id DESC""", (sid, shift_id, shift_id))]
+
+
+def respond_correction(db, user, correction_id, body):
+    response = required_note(body.get("response"), "a clarification or proposed correction", 1000)
+    with transaction(db, immediate=True):
+        row = db.execute("SELECT * FROM corrections WHERE id = ? AND station_id = ?", (correction_id, user["station_id"])).fetchone()
+        if not row:
+            fail("Correction request not found.", 404)
+        if row["resolved_at"] or row["responded_at"]:
+            fail("This request has already been answered or closed.", 409)
+        db.execute("UPDATE corrections SET response = ?, responded_by = ?, responded_at = ? WHERE id = ?",
+                   (response, user["id"], now(), correction_id))
+    return {"ok": True}
+
+
+def business_state(db, sid, *, in_write=False):
+    queries = [
+        ("SELECT s.*, u.name AS opener FROM shifts s JOIN users u ON u.id = s.opened_by WHERE s.station_id = ? ORDER BY s.id", (sid,)),
+        ("SELECT * FROM customers WHERE station_id = ?", (sid,)),
+        ("SELECT r.*, u.name AS actor FROM repayments r JOIN users u ON u.id = r.user_id WHERE r.station_id = ? ORDER BY r.id", (sid,)),
+        ("SELECT b.*, u.name AS actor FROM bank_records b JOIN users u ON u.id = b.user_id WHERE b.station_id = ? ORDER BY b.id", (sid,)),
+        ("SELECT * FROM tanks WHERE station_id = ?", (sid,)),
+        ("SELECT r.shift_id FROM reviews r JOIN shifts s ON s.id = r.shift_id WHERE s.station_id = ?", (sid,)),
+        ("SELECT * FROM exception_acknowledgements WHERE station_id = ?", (sid,)),
+        ("SELECT fuel, opening_stock FROM fuels WHERE station_id = ?", (sid,)),
+        ("SELECT * FROM corrections WHERE station_id = ? ORDER BY id DESC", (sid,)),
+        ("SELECT * FROM credit_allocations WHERE station_id = ? ORDER BY id", (sid,)),
+        ("SELECT v.*, u.name AS actor FROM record_voids v JOIN users u ON u.id = v.user_id WHERE v.station_id = ?", (sid,)),
+    ]
+    results = ([list(rows) for rows in execute_many(db, queries)] if in_write else read_snapshot(db, queries))
+    shifts, configs, repayments, bank, tanks, reviews, acks, fuels, corrections, allocations, voids = results
+    void_lookup = {(row["record_type"], row["record_id"]): dict(row) for row in voids}
+    repayment_history = [dict(row) | {"void": void_lookup.get(("repayment", row["id"]))} for row in repayments]
+    bank_history = [dict(row) | {"void": void_lookup.get(("bank", row["id"]))} for row in bank]
+    repayments = [row for row in repayment_history if not row["void"]]
+    bank = [row for row in bank_history if not row["void"]]
+    customers = {row["customer_key"]: dict(row) | {"sales": 0, "repaid": 0, "transactions": []} for row in configs}
+    settlements = []
+    exceptions = []
+    stock = {row["fuel"]: row["opening_stock"] for row in fuels}
+    reviewed = {row["shift_id"] for row in reviews}
+    active = None
+    unallocated = 0
+    unallocated_shifts = []
+
+    def customer(name):
+        key = name.strip().casefold()
+        return customers.setdefault(key, {"customer_key": key, "name": name.strip(), "due_date": "", "sales": 0, "repaid": 0, "transactions": []})
+
+    def issue(key, kind, message, signature, shift_id=None):
+        exceptions.append({"key": key, "kind": kind, "message": message, "signature": str(signature), "shift_id": shift_id})
+
+    def receivable(source, method, expected, label):
+        records = [dict(item) for item in bank if item["source"] == source and item["method"] == method]
+        gross = sum(item["amount"] + item["fees"] for item in records)
+        settlements.append({"source": source, "method": method, "label": label, "expected": expected,
+                            "banked": sum(item["amount"] for item in records), "fees": sum(item["fees"] for item in records),
+                            "remaining": expected - gross, "records": records})
+
+    for row in shifts:
+        if not row["submitted_at"]:
+            hours = max(0, (datetime.fromisoformat(now()) - datetime.fromisoformat(row["opened_at"])).total_seconds() / 3600)
+            active = {**open_shift_public(row), "opener": row["opener"], "hours": round(hours, 1), "overdue": hours >= 12}
+            if hours >= 12:
+                issue(f"overdue:{row['id']}", "Overdue shift", f"Shift #{row['id']} has been open for {hours:.1f} hours.", row["opened_at"], row["id"])
+            continue
+        payload = json.loads(row["report_json"])
+        shift_id = row["id"]
+        for kind, field in (("Cash difference", "cash_difference"), ("Collection difference", "collection_difference")):
+            if payload[field]:
+                issue(f"{field}:{shift_id}", kind, f"Shift #{shift_id}: ₹{payload[field] / 100:,.2f}.", payload[field], shift_id)
+        if shift_id not in reviewed:
+            issue(f"review:{shift_id}", "Pending review", f"Shift #{shift_id} is awaiting owner review.", hashlib.sha256(row["report_json"].encode()).hexdigest(), shift_id)
+        for fuel in FUELS:
+            item = payload["fuels"][fuel]
+            stock[fuel] += item["delivery"] - item["litres"]
+            if item["physical"] is not None and item["physical"] != stock[fuel]:
+                diff = item["physical"] - stock[fuel]
+                issue(f"stock:{shift_id}:{fuel}", "Stock difference", f"Shift #{shift_id}, {fuel}: physical minus book stock {diff / 1000:,.3f} L.", diff, shift_id)
+        credit_entries = [item for item in payload.get("entries", {}).get("payments", []) if item["method"] == "credit"]
+        if not credit_entries:
+            assigned = [item for item in allocations if item["shift_id"] == shift_id]
+            remaining = payload["collections"].get("credit", 0) - sum(item["amount"] for item in assigned)
+            unallocated += remaining
+            if remaining:
+                unallocated_shifts.append({"shift_id": shift_id, "remaining": remaining})
+            for allocation in assigned:
+                item = customer(allocation["name"])
+                item["sales"] += allocation["amount"]
+                item["transactions"].append({"date": row["business_date"], "type": "Allocated credit sale", "amount": allocation["amount"],
+                                             "reference": allocation["reference"], "note": "Allocated by owner", "shift_id": shift_id})
+        for entry in credit_entries:
+            item = customer(entry["party"])
+            item["sales"] += entry["amount"]
+            item["transactions"].append({"date": row["business_date"], "type": "Credit sale", "amount": entry["amount"],
+                                         "reference": entry["reference"], "note": entry["note"], "shift_id": shift_id})
+        for method in ("upi", "card", "cash"):
+            expected = max(0, payload["counted"]) if method == "cash" else payload["collections"][method]
+            if expected:
+                receivable(f"shift:{shift_id}", method, expected, f"Shift #{shift_id} · {row['business_date']}")
+    for row in repayments:
+        item = customers.get(row["customer_key"])
+        if item is None:
+            continue
+        item["repaid"] += row["amount"]
+        item["transactions"].append({"date": row["paid_on"], "type": "Repayment", "amount": -row["amount"],
+                                     "reference": row["reference"], "note": row["note"], "actor": row["actor"]})
+        if row["method"] == "cash":
+            receivable(f"repayment:{row['id']}", "cash", row["amount"], f"Cash repayment · {item['name']} · {row['paid_on']}")
+    for item in customers.values():
+        item["balance"] = item["sales"] - item["repaid"]
+        item["transactions"].sort(key=lambda entry: entry["date"])
+        item["overdue"] = bool(item["balance"] > 0 and item["due_date"] and item["due_date"] < now()[:10])
+        if item["overdue"]:
+            issue("credit:" + item["customer_key"], "Overdue customer", f"{item['name']}: ₹{item['balance'] / 100:,.2f} due since {item['due_date']}.", f"{item['balance']}:{item['due_date']}")
+    for row in tanks:
+        if stock[row["fuel"]] > row["capacity"]:
+            issue("capacity:" + row["fuel"], "Above tank capacity", f"{row['fuel']}: calculated stock exceeds configured capacity.", stock[row["fuel"]])
+        if stock[row["fuel"]] <= row["low_level"]:
+            issue("low:" + row["fuel"], "Low stock", f"{row['fuel']}: {stock[row['fuel']] / 1000:,.3f} L remaining.", stock[row["fuel"]])
+    for item in settlements:
+        if item["remaining"] > 0:
+            issue(f"bank:{item['source']}:{item['method']}", "Cash awaiting deposit" if item["method"] == "cash" else "Pending bank settlement",
+                  f"{item['label']}, {item['method']}: ₹{item['remaining'] / 100:,.2f} outstanding.", item["remaining"])
+    if unallocated:
+        issue("unallocated-credit", "Unallocated customer credit", f"₹{unallocated / 100:,.2f} credit needs customer allocation.", unallocated)
+    for row in corrections:
+        if not row["resolved_at"]:
+            issue(f"correction:{row['id']}", "Correction request", f"Shift #{row['shift_id']}: {row['reason']}" + (" · Manager responded" if row["responded_at"] else " · Awaiting manager"), row["responded_at"] or row["requested_at"], row["shift_id"])
+    acknowledged = {row["exception_key"]: dict(row) for row in acks}
+    for item in exceptions:
+        ack = acknowledged.get(item["key"])
+        item["acknowledgement"] = ack if ack and ack["signature"] == item["signature"] else None
+    return {"active": active, "customers": sorted(customers.values(), key=lambda item: item["name"].casefold()),
+            "unallocated_credit": unallocated, "unallocated_shifts": unallocated_shifts, "settlements": settlements, "bank_records": bank_history,
+            "repayments": repayment_history, "tanks": {row["fuel"]: dict(row) for row in tanks},
+            "stock": stock, "exceptions": exceptions, "corrections": [dict(row) for row in corrections],
+            "today": now()[:10]}
+
+
+def owner_control_route(db, user, method, route, body):
+    sid = user["station_id"]
+    if method == "GET" and route == "/business":
+        return business_state(db, sid)
+    void_match = re.fullmatch(r"/money-records/(repayment|bank)/([0-9]{1,18})/void", route)
+    if method == "POST" and void_match:
+        kind, record_id = void_match[1], int(void_match[2])
+        reason = required_note(body.get("reason"), "the reason for voiding this record", 500)
+        with transaction(db, immediate=True):
+            state = business_state(db, sid, in_write=True)
+            target = next((row for row in state["repayments" if kind == "repayment" else "bank_records"] if row["id"] == record_id), None)
+            if not target:
+                fail("Money record not found.", 404)
+            if target["void"]:
+                fail("This record is already void.", 409)
+            if kind == "repayment" and any(row["source"] == f"repayment:{record_id}" and not row["void"] for row in state["bank_records"]):
+                fail("Void the linked cash deposit before voiding this repayment.", 409)
+            db.execute("INSERT INTO record_voids VALUES (?, ?, ?, ?, ?, ?)", (sid, kind, record_id, reason, user["id"], now()))
+        return {"ok": True}
+    match = re.fullmatch(r"/managers/([0-9]{1,18})", route)
+    if method == "POST" and match:
+        manager_id = int(match[1])
+        with transaction(db, immediate=True):
+            target = db.execute("SELECT * FROM users WHERE id = ? AND station_id = ? AND role = 'manager'", (manager_id, sid)).fetchone()
+            if not target:
+                fail("Manager not found.", 404)
+            action = body.get("action")
+            if action in ("disable", "enable"):
+                db.execute("INSERT INTO manager_controls(user_id, disabled) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET disabled = excluded.disabled", (manager_id, int(action == "disable")))
+            elif action == "reset_password":
+                password = body.get("password")
+                if not valid_new_password(password):
+                    fail("Use a password of 7–200 characters.")
+                salt = secrets.token_hex(16)
+                db.execute("UPDATE users SET salt = ?, password_hash = ? WHERE id = ?", (salt, password_hash(password, salt), manager_id))
+            elif action == "edit":
+                name = required_note(body.get("name"), "the manager's name", 80)
+                phone = indian_mobile(body.get("phone"))
+                if not phone:
+                    fail("Enter a valid Indian mobile number.")
+                if db.execute("SELECT 1 FROM users WHERE login_id = ? AND id <> ?", (phone, manager_id)).fetchone():
+                    fail("That mobile number is already registered.", 409)
+                db.execute("UPDATE users SET name = ?, login_id = ? WHERE id = ?", (name, phone, manager_id))
+            elif action != "revoke_sessions":
+                fail("Choose a valid manager action.")
+            db.execute("DELETE FROM sessions WHERE user_id = ?", (manager_id,))
+        return {"ok": True}
+    if method == "POST" and route == "/tanks":
+        fuel = body.get("fuel")
+        if fuel not in FUELS:
+            fail("Choose Petrol or Diesel.")
+        capacity = number(body.get("capacity"), 3, "tank capacity")
+        threshold = number(body.get("low_level"), 3, "low stock threshold")
+        if not 0 < capacity or threshold >= capacity:
+            fail("Capacity must be positive and the low stock threshold must be below capacity.")
+        with transaction(db, immediate=True):
+            db.execute("INSERT INTO tanks VALUES (?, ?, ?, ?) ON CONFLICT(station_id, fuel) DO UPDATE SET capacity = excluded.capacity, low_level = excluded.low_level", (sid, fuel, capacity, threshold))
+        return {"ok": True}
+    if method == "POST" and route in ("/customers", "/repayments", "/bank-records", "/exceptions/acknowledge", "/credit-allocations"):
+        with transaction(db, immediate=True):
+            state = business_state(db, sid, in_write=True)
+            if route == "/credit-allocations":
+                target = next((item for item in state["unallocated_shifts"] if item["shift_id"] == body.get("shift_id")), None)
+                if not target:
+                    fail("No unallocated credit found for this shift.", 404)
+                amount = number(body.get("amount"), 2, "credit allocation")
+                if not 0 < amount <= target["remaining"]:
+                    fail("Allocate a positive amount within the unallocated balance.", 409)
+                name = required_note(body.get("name"), "a customer name", 150)
+                reference = required_note(body.get("reference"), "a unique allocation reference", 150)
+                try:
+                    db.execute("INSERT INTO credit_allocations(station_id, shift_id, name, amount, reference, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (sid, target["shift_id"], name, amount, reference, user["id"], now()))
+                except sqlite3.IntegrityError:
+                    fail("This allocation reference has already been recorded.", 409)
+            elif route == "/customers":
+                name = required_note(body.get("name"), "a customer name", 150)
+                due = business_date(body["due_date"]) if body.get("due_date") else ""
+                db.execute("INSERT INTO customers VALUES (?, ?, ?, ?) ON CONFLICT(station_id, customer_key) DO UPDATE SET name = excluded.name, due_date = excluded.due_date", (sid, name.casefold(), name, due))
+            elif route == "/exceptions/acknowledge":
+                key = note(body.get("key"), "an exception", 250)
+                issue = next((item for item in state["exceptions"] if item["key"] == key), None)
+                if not issue:
+                    fail("This exception is no longer active. Refresh the inbox.", 409)
+                message = required_note(body.get("note"), "a follow-up note", 500)
+                db.execute("INSERT INTO exception_acknowledgements VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(station_id, exception_key) DO UPDATE SET signature = excluded.signature, note = excluded.note, user_id = excluded.user_id, created_at = excluded.created_at", (sid, key, issue["signature"], message, user["id"], now()))
+            else:
+                amount = number(body.get("amount"), 2, "amount")
+                if amount <= 0:
+                    fail("Amount must be greater than zero.")
+                reference = required_note(body.get("reference"), "a unique bank or receipt reference", 150)
+                message = note(body.get("note", ""), "a note", 500)
+                if route == "/repayments":
+                    key = note(body.get("customer_key"), "a customer", 150)
+                    customer = next((item for item in state["customers"] if item["customer_key"] == key), None)
+                    if customer is None:
+                        fail("Customer not found.", 404)
+                    if amount > customer["balance"]:
+                        fail("Repayment exceeds the customer's outstanding balance.", 409)
+                    if body.get("method") not in ("cash", "bank"):
+                        fail("Choose cash received or confirmed bank receipt.")
+                    paid_on = business_date(body.get("paid_on"))
+                    if paid_on > now()[:10]:
+                        fail("A repayment cannot be recorded in the future.")
+                    sql = "INSERT INTO repayments(station_id, customer_key, amount, method, paid_on, reference, note, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    params = (sid, key, amount, body["method"], paid_on, reference, message, user["id"], now())
+                else:
+                    source = note(body.get("source"), "a payment source", 80)
+                    method_name = body.get("method")
+                    target = next((item for item in state["settlements"] if item["source"] == source and item["method"] == method_name), None)
+                    if target is None:
+                        fail("Payment source not found.", 404)
+                    fees = number(body.get("fees", "0"), 2, "settlement fees")
+                    if method_name == "cash" and fees:
+                        fail("Cash deposits cannot include settlement fees.")
+                    if amount + fees > target["remaining"]:
+                        fail("Amount plus fees exceeds the unreconciled balance.", 409)
+                    bank_date = business_date(body.get("bank_date"))
+                    if bank_date > now()[:10]:
+                        fail("A bank receipt cannot be recorded in the future.")
+                    sql = "INSERT INTO bank_records(station_id, source, method, amount, fees, bank_date, reference, note, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    params = (sid, source, method_name, amount, fees, bank_date, reference, message, user["id"], now())
+                try:
+                    db.execute(sql, params)
+                except sqlite3.IntegrityError:
+                    fail("This reference has already been recorded. Refresh before trying again.", 409)
+        return {"ok": True}
+    match = re.fullmatch(r"/shifts/([0-9]{1,18})/(corrections|revise)", route)
+    if method == "POST" and match:
+        shift_id = int(match[1])
+        if match[2] == "revise":
+            return submit_shift(db, user, shift_id, body, revision=True)
+        reason = required_note(body.get("reason"), "the correction or clarification needed", 500)
+        with transaction(db, immediate=True):
+            report(db, sid, shift_id)
+            if db.execute("SELECT 1 FROM corrections WHERE station_id = ? AND shift_id = ? AND resolved_at IS NULL", (sid, shift_id)).fetchone():
+                fail("An open correction request already exists for this shift.", 409)
+            db.execute("INSERT INTO corrections(station_id, shift_id, requested_by, requested_at, reason) VALUES (?, ?, ?, ?, ?)", (sid, shift_id, user["id"], now(), reason))
+        return {"ok": True}
+    match = re.fullmatch(r"/corrections/([0-9]{1,18})/resolve", route)
+    if method == "POST" and match:
+        resolution = required_note(body.get("resolution"), "the resolution and any adjustment made", 1000)
+        with transaction(db, immediate=True):
+            row = db.execute("SELECT * FROM corrections WHERE id = ? AND station_id = ?", (int(match[1]), sid)).fetchone()
+            if not row:
+                fail("Correction request not found.", 404)
+            if row["resolved_at"]:
+                fail("This correction request is already closed.", 409)
+            db.execute("UPDATE corrections SET resolved_at = ?, resolved_by = ?, resolution = ? WHERE id = ?", (now(), user["id"], resolution, row["id"]))
+        return {"ok": True}
+    return None
 
 
 class Request:
@@ -643,7 +1037,8 @@ class Request:
         user = db.execute("""SELECT u.id, u.role, u.name, u.station_id, s.name AS station, s.code AS station_code
                              FROM sessions t JOIN users u ON u.id = t.user_id
                              JOIN stations s ON s.id = u.station_id
-                             WHERE t.token_hash = ? AND t.expiry > ?""", (self.token(role), int(time.time()))).fetchone()
+                             WHERE t.token_hash = ? AND t.expiry > ?
+                             AND NOT EXISTS (SELECT 1 FROM manager_controls mc WHERE mc.user_id = u.id AND mc.disabled = 1)""", (self.token(role), int(time.time()))).fetchone()
         if not user:
             fail("Sign in to continue.", 401)
         if user["role"] != role:
@@ -660,7 +1055,8 @@ class Request:
             fail("Sign in to continue.", 401)
         data = None
         if method == "POST":
-            closing_shift = role == "manager" and re.fullmatch(r"/shifts/[0-9]{1,18}/submit", route)
+            closing_shift = ((role == "manager" and re.fullmatch(r"/shifts/[0-9]{1,18}/submit", route))
+                             or (role == "owner" and re.fullmatch(r"/shifts/[0-9]{1,18}/revise", route)))
             data = self.payload(SHIFT_BODY_LIMIT if closing_shift else JSON_BODY_LIMIT)
         with closing(open_db(self.database)) as db:
             if login:
@@ -671,7 +1067,8 @@ class Request:
                     fail("Enter a password of up to 200 characters.")
                 user = db.execute("SELECT * FROM users WHERE login_id = ?", (login_id,)).fetchone()
                 digest = password_hash(password, user["salt"] if user else "0" * 32)
-                if not user or not secrets.compare_digest(digest, user["password_hash"]):
+                disabled = user and db.execute("SELECT 1 FROM manager_controls WHERE user_id = ? AND disabled = 1", (user["id"],)).fetchone()
+                if not user or disabled or not secrets.compare_digest(digest, user["password_hash"]):
                     fail("Sign-in details are incorrect.", 401)
                 if user["role"] != role:
                     fail("This account cannot sign in to this app.", 403)
@@ -681,6 +1078,7 @@ class Request:
                     db.execute("DELETE FROM sessions WHERE expiry <= ?", (int(time.time()),))
                     issued = db.execute("""INSERT INTO sessions(token_hash, user_id, expiry)
                         SELECT ?, id, ? FROM users WHERE id = ? AND salt = ?
+                        AND NOT EXISTS (SELECT 1 FROM manager_controls WHERE user_id = users.id AND disabled = 1)
                         RETURNING token_hash""",
                         (hashlib.sha256(token.encode()).hexdigest(), int(time.time()) + expiry,
                          user["id"], user["salt"])).fetchone()
@@ -724,6 +1122,16 @@ class Request:
             return result, None
 
     def shift_route(self, db, user, role, method, route, data):
+        if role == "owner":
+            control = owner_control_route(db, user, method, route, data)
+            if control is not None:
+                return control
+        if role == "manager" and route == "/corrections" and method == "GET":
+            return correction_list(db, user["station_id"])
+        response = re.fullmatch(r"/corrections/([0-9]{1,18})/respond", route)
+        if role == "manager" and method == "POST" and response:
+            return respond_correction(db, user, int(response[1]), data)
+
         match = re.fullmatch(r"/shifts/([0-9]{1,18})(/submit|/review)?", route)
         if match:
             shift_id, action = int(match[1]), match[2]
