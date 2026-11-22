@@ -33,6 +33,24 @@ function collectEntries(form) {
   ));
 }
 
+function restoreEntries(form, entries) {
+  if (!entries) return;
+  for (const [category, rows] of Object.entries(entries)) {
+    if (!Array.isArray(rows) || !rows.length) continue;
+    const list = form.querySelector(`[data-entry-list="${category}"]`);
+    if (!list) continue;
+    list.innerHTML = "";
+    for (const row of rows) {
+      list.insertAdjacentHTML("beforeend", entryRow(category));
+      const lastRow = list.lastElementChild;
+      for (const [field, val] of Object.entries(row)) {
+        const input = lastRow.querySelector(`[data-field="${field}"]`);
+        if (input && val !== undefined) input.value = val;
+      }
+    }
+  }
+}
+
 function bindManagerEntries(form, active) {
   let calculated = new Set();
   const sync = () => {

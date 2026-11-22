@@ -1,8 +1,66 @@
-:root { font: 100%/1.6 system-ui, sans-serif; color: #182738; background: #f3f5f7; }
-body { margin: 0; padding: max(24px, env(safe-area-inset-top)) 20px; }
-main { max-width: 410px; margin: 10vh auto; }
-img { object-fit: contain; background: white; border-radius: 12px; }
-h1 { font-size: 1.85rem; line-height: 1.2; letter-spacing: -.035em; }
-p { color: #47596c; }
-a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; color: white; background: #163d68; border-radius: 8px; font-weight: 650; text-decoration: none; }
-a:focus-visible { outline: 3px solid #265d92; outline-offset: 3px; }
+:root {
+  font: 100%/1.6 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  color: #0f172a;
+  background: #f8fafc;
+}
+body {
+  margin: 0;
+  padding: max(24px, env(safe-area-inset-top)) 20px;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+main {
+  max-width: 420px;
+  width: 100%;
+  margin: 0 auto;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  padding: 2.25rem 2rem;
+  box-shadow: 0 12px 32px -4px rgba(15, 23, 42, 0.08);
+  text-align: center;
+}
+img {
+  object-fit: contain;
+  background: white;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  margin-bottom: 1.25rem;
+}
+h1 {
+  font-size: 1.85rem;
+  line-height: 1.2;
+  letter-spacing: -0.035em;
+  font-weight: 750;
+  margin: 0 0 0.75rem;
+  color: #0f172a;
+}
+p {
+  color: #64748b;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  margin: 0 0 1.5rem;
+}
+a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  width: 100%;
+  padding: 0 20px;
+  color: #ffffff;
+  background: linear-gradient(180deg, #1b497c 0%, #13355b 100%);
+  border: 1px solid #13355b;
+  border-radius: 0.5rem;
+  font-weight: 650;
+  font-size: 0.95rem;
+  text-decoration: none;
+  box-shadow: 0 1px 2px rgba(19, 53, 91, 0.2);
+  transition: all 0.15s ease;
+}
+a:hover {
+  background: linear-gradient(180deg, #163d68 0%, #0d2744 100%);
+}
+a:focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }

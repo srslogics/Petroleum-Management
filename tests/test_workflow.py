@@ -425,7 +425,10 @@ class HostedTest(unittest.TestCase):
                         cursor = self.db.execute(statement["sql"], params)
                         rows = cursor.fetchall()
                     except sqlite3.Error as error:
-                        results.append({"type": "error", "error": {"code": error.sqlite_errorname}})
+                        code = getattr(error, "sqlite_errorname", None)
+                        if not code and isinstance(error, sqlite3.IntegrityError):
+                            code = "SQLITE_CONSTRAINT_UNIQUE"
+                        results.append({"type": "error", "error": {"code": code or "SQLITE_ERROR"}})
                         continue
                     results.append({"type": "ok", "response": {"type": "execute", "result": {
                         "cols": [{"name": column[0]} for column in cursor.description or ()],
