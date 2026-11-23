@@ -122,7 +122,7 @@ function showLogin(message = "") {
 function shell(content, view = "home") {
   stopManagerDraft?.();
   const navigation = role === "owner"
-    ? [["home", "Overview"], ["daily-report", "Daily report"], ["money", "Money"], ["payroll", "Payroll"], ["payables", "Payables"], ["operations", "Operations"], ["exceptions", "Exceptions"], ["settings", "Settings"], ["team", "Team"]]
+    ? [["home", "Overview"], ["daily-report", "Daily report"], ["money", "Money"], ["payroll", "Payroll"], ["payables", "Payables"], ["automation", "Automation"], ["operations", "Operations"], ["exceptions", "Exceptions"], ["settings", "Settings"], ["team", "Team"]]
     : [["home", "Shift operations"], ["requests", "Owner requests"]];
   const shouldFocus = document.activeElement && document.activeElement !== document.body;
   if (installBar) document.body.append(installBar);
@@ -165,6 +165,7 @@ function shell(content, view = "home") {
     listen("settings", openSettings);
     listen("daily-report", openDailyReport);
     listen("team", openTeam);
+    listen("automation", () => openAutomation());
     for (const view of ["payroll", "payables"]) listen(view, () => openOutgoings(view));
     for (const view of ["money", "operations", "exceptions"]) listen(view, () => openBusiness(view));
   }
@@ -680,6 +681,7 @@ function navigationIcon(id) {
     money: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M16 14h2"/>',
     payroll: '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 12h5m-5 4h5m-5 4h5"/>',
     payables: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3ZM9 8h6m-6 4h6m-6 4h3"/>',
+    automation: '<path d="m13 2-9 12h7l-1 8L21 9h-8l0-7Z"/>',
     operations: '<path d="M5 20V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v15M3 20h14M8 7h4v4H8zM15 12h2a2 2 0 0 1 2 2v3a1 1 0 0 0 2 0V8l-3-3"/>',
     exceptions: '<path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v4m0 4h.01"/>',
     settings: '<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/>',

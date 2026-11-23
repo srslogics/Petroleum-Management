@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, urlsplit
 from wsgiref.simple_server import WSGIServer, make_server
 from zoneinfo import ZoneInfo
 
+from automation import AUTOMATION_SCHEMA, Automation, accept_feed
 from manager_drafts import DRAFT_SCHEMA, draft_route
 from outgoings import OUTGOING_SCHEMA, outgoing_route
 from database import TursoDatabase, execute_many, open_db, read_snapshot, transaction
@@ -127,12 +128,13 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 """
 
-SCHEMA += OUTGOING_SCHEMA + DRAFT_SCHEMA
+SCHEMA += OUTGOING_SCHEMA + DRAFT_SCHEMA + AUTOMATION_SCHEMA
 
 STATIC_FILES = {
     "/app.js": "text/javascript", "/styles.css": "text/css", "/workspace.css": "text/css", "/daily-report.js": "text/javascript",
     "/typography.css": "text/css", "/money.css": "text/css", "/money.js": "text/javascript", "/outgoings.js": "text/javascript", "/outgoings.css": "text/css",
     "/manager-workflow.js": "text/javascript", "/manager-workflow.css": "text/css",
+    "/automation.js": "text/javascript", "/automation.css": "text/css",
     "/fonts/inter-latin.woff2": "font/woff2", "/fonts/inter-latin-ext.woff2": "font/woff2",
     "/tuljai-logo.jpg": "image/jpeg",
     "/manager-entries.js": "text/javascript",
@@ -560,8 +562,9 @@ def owner_state(db, sid, selected):
             "can_edit_opening_stock": not petrol[0]["submitted"]}
 
 
-def daily_owner_report(db, sid, selected):
-    opening_rows, prior_rows, rows = read_snapshot(db, [
+def daily_owner_report(db, sid, selected, *, in_write=False):
+    reader = (lambda connection, queries: [list(result) for result in execute_many(connection, queries)]) if in_write else read_snapshot
+    opening_rows, prior_rows, rows = reader(db, [
         ("SELECT fuel, opening_stock FROM fuels WHERE station_id = ?", (sid,)),
         ("""
         SELECT
@@ -580,7 +583,7 @@ def daily_owner_report(db, sid, selected):
         WHERE s.station_id = ? AND s.business_date = ? AND s.submitted_at IS NOT NULL ORDER BY s.id
         """, (sid, selected)),
     ])
-    opening = {row["fuel"]: row["opening_stock"] for row in opening_rows}
+    opening = dict.fromkeys(FUELS, 0) | {row["fuel"]: row["opening_stock"] for row in opening_rows}
     prior = prior_rows[0]
     fuels = {
         fuel: {"opening_stock": opening[fuel] + prior[fuel], "litres": 0, "sales": 0,
@@ -1019,12 +1022,13 @@ def owner_control_route(db, user, method, route, body):
 
 
 class Request:
-    def __init__(self, environ, database, hosted, demo, public_url="https://petroleum-management.onrender.com"):
+    def __init__(self, environ, database, hosted, demo, public_url="https://petroleum-management.onrender.com", automation_env=None):
         self.environ = environ
         self.database = database
         self.hosted = hosted
         self.demo = demo
         self.public_url = public_url
+        self.automation_env = automation_env or {}
 
     def payload(self, limit=JSON_BODY_LIMIT):
         if self.environ.get("CONTENT_TYPE", "").partition(";")[0].strip().lower() != "application/json":
@@ -1078,7 +1082,8 @@ class Request:
         if method == "POST":
             closing_shift = ((role == "manager" and re.fullmatch(r"/shifts/[0-9]{1,18}/(submit|draft)", route))
                              or (role == "owner" and re.fullmatch(r"/shifts/[0-9]{1,18}/(revise|submit)", route)))
-            data = self.payload(SHIFT_BODY_LIMIT if closing_shift else JSON_BODY_LIMIT)
+            limit = 6 * 1024 * 1024 if route == "/automation/documents" else SHIFT_BODY_LIMIT if closing_shift or route.startswith("/automation/imports") else JSON_BODY_LIMIT
+            data = self.payload(limit)
         with closing(open_db(self.database)) as db:
             if login:
                 identifier = note(data.get("identifier", data.get("email", "")), "a mobile number or email", 254).lower()
@@ -1142,12 +1147,25 @@ class Request:
                 result = self.shift_route(db, user, role, method, route, data)
             return result, None
 
+    def automation_helpers(self):
+        return dict(now=now, fail=fail, number=number, note=note, business_state=business_state, daily_report=daily_owner_report, env=self.automation_env, database=self.database)
+
     def shift_route(self, db, user, role, method, route, data):
+        if route == "/automation" or route.startswith("/automation/"):
+            try:
+                return Automation(db, user, **self.automation_helpers()).route(method, route, data, parse_qs(self.environ.get("QUERY_STRING", "")))
+            except sqlite3.IntegrityError:
+                fail("This salary, bill or bank reference already exists. Review the original record.", 409)
         if role == "manager":
             draft = draft_route(db, user, method, route, data, fail=fail, note=note, now=now)
             if draft is not None:
                 return draft
         if role == "owner":
+            if method == "GET" and route in ("/payroll", "/payables"):
+                service = Automation(db, user, **self.automation_helpers())
+                last = db.execute("SELECT ran_at FROM automation_runs WHERE station_id=?", (user["station_id"],)).fetchone()
+                if not last or last["ran_at"][:10] != now()[:10]:
+                    service.run()
             control = owner_control_route(db, user, method, route, data)
             if control is not None:
                 return control
@@ -1173,6 +1191,12 @@ class Request:
         path = self.environ["PATH_INFO"]
         json_type = "application/json; charset=utf-8"
         try:
+            feed = re.fullmatch(r"/api/feeds/([a-f0-9]{32})", path)
+            if feed and method == "POST":
+                data = self.payload(SHIFT_BODY_LIMIT)
+                with closing(open_db(self.database)) as db:
+                    result = accept_feed(db, feed[1], self.environ.get("HTTP_AUTHORIZATION", ""), data, **self.automation_helpers())
+                return 200, json.dumps(result).encode(), json_type, None
             if path.startswith("/api/") and method in ("GET", "POST"):
                 result, cookie = self.api(method, path)
                 return 200, json.dumps(result).encode(), json_type, cookie
@@ -1236,7 +1260,7 @@ def create_app(database=None, env=None):
         raise RuntimeError("PUBLIC_APP_URL must be the public app origin, such as https://your-app.onrender.com.")
 
     def application(environ, start_response):
-        status, body, content_type, cookie = Request(environ, database, hosted, demo, public_url).dispatch()
+        status, body, content_type, cookie = Request(environ, database, hosted, demo, public_url, {key: env[key] for key in ("OPENAI_API_KEY", "AUTOMATION_OCR_MODEL") if env.get(key)}).dispatch()
         path = environ["PATH_INFO"]
         cache_control = "no-store"
         if (status == 200 and path in STATIC_FILES and path != "/sw.js"
