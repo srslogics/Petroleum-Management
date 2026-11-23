@@ -54,8 +54,12 @@ test('both apps can enroll an authenticator and sign in with a recovery code', a
     const verification = page.getByLabel('Authenticator or recovery code');
     await verification.waitFor();
     assert.equal((await page.request.get(origin+'/api/'+role+'/session')).status(),401);
+    await page.getByRole('heading',{name:'Verify your sign-in'}).waitFor();
+    assert.ok(await page.locator('#password').isHidden());
+    await page.getByRole('button',{name:'Back to sign in'}).click();
+    await signIn();
     await verification.fill(recoveryCode);
-    await page.getByRole('button',{name:'Sign in',exact:true}).click();
+    await page.getByRole('button',{name:'Verify and sign in',exact:true}).click();
     await page.getByRole('button',{name:'Account security'}).click();
     await page.getByText('On for this account.',{exact:true}).waitFor();
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));

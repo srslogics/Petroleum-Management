@@ -155,7 +155,7 @@ STATIC_FILES = {
     "/app.js": "text/javascript", "/styles.css": "text/css", "/workspace.css": "text/css", "/daily-report.js": "text/javascript",
     "/typography.css": "text/css", "/money.css": "text/css", "/money.js": "text/javascript", "/outgoings.js": "text/javascript", "/outgoings.css": "text/css",
     "/manager-workflow.js": "text/javascript", "/manager-workflow.css": "text/css",
-    "/mfa.js": "text/javascript",
+    "/mfa.js": "text/javascript", "/auth.css": "text/css",
     "/automation.js": "text/javascript", "/automation.css": "text/css",
     "/fonts/inter-latin.woff2": "font/woff2", "/fonts/inter-latin-ext.woff2": "font/woff2",
     "/tuljai-logo.jpg": "image/jpeg",

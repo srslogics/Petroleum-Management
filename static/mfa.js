@@ -54,14 +54,15 @@ function showAuthenticatorSetup(key) {
 
 function showRecoveryCodes(codes) {
   session = null;
-  if (installBar) document.body.append(installBar);
-  root.innerHTML = `<div class="entry"><header class="entry-header">${brand()}</header>
-    <main class="login card"><h1>Save your recovery codes</h1>
-      <p>Keep these somewhere private. Each code works once in place of an authenticator code.</p>
-      <label>Recovery codes<textarea rows="8" readonly spellcheck="false">${safe(codes.join("\n"))}</textarea></label>
+  mountAuth(`<main class="auth-form-panel">
+    <header class="auth-heading"><p class="eyebrow">Account security</p><h1>Save your recovery codes</h1>
+    <p>Keep these somewhere private. Each code works once in place of an authenticator code.</p></header>
+    <div class="auth-form">
+      <label>Recovery codes<textarea class="auth-recovery-codes" rows="8" readonly spellcheck="false">${safe(codes.join("\n"))}</textarea></label>
       <p>Wait for your authenticator to show a new code before signing in again.</p>
-      <button id="mfa-sign-in" class="primary" type="button">I saved my codes. Sign in</button>
-    </main></div>`;
+      <button id="mfa-sign-in" class="primary auth-primary" type="button">I saved my codes. Sign in ${icon("arrow")}</button>
+    </div>
+  </main>`);
   listen("mfa-sign-in", () => showLogin());
   root.querySelector("h1").setAttribute("tabindex", "-1");
   root.querySelector("h1").focus();

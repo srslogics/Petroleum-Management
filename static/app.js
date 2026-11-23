@@ -76,31 +76,65 @@ function brand() {
   </a>`;
 }
 
-function showLogin(message = "") {
+function authFrame(content) {
+  const owner = role === "owner";
+  return `<div class="auth-page">
+    <div class="auth-frame">
+      <aside class="auth-brand-panel" aria-label="Tuljai Petroleum">
+        ${brand()}
+        <div class="auth-brand-copy">
+          <span class="auth-brand-line" aria-hidden="true"></span>
+          <p class="auth-brand-title">Fuel station<br>workspace</p>
+          <p class="auth-brand-detail">${owner
+            ? "Track sales, stock and the station’s finances."
+            : "Record readings, collections and deliveries."}</p>
+        </div>
+      </aside>
+      <div class="auth-content">${content}</div>
+    </div>
+    <footer class="auth-footer">
+      <a href="/${owner ? "manager" : "owner"}">${owner ? "Manager sign-in" : "Owner sign-in"}</a>
+      <div id="auth-install"></div>
+    </footer>
+  </div>`;
+}
+
+function mountAuth(content) {
   if (installBar) document.body.append(installBar);
+  root.innerHTML = authFrame(content);
+  if (installBar) root.querySelector("#auth-install").append(installBar);
+}
+
+function showLogin(message = "") {
   const demoMode = document.querySelector('meta[name="demo-mode"]');
-  root.innerHTML = `<div class="entry">
-    <header class="entry-header">${brand()}</header>
-    <main class="login card">
-      <p class="eyebrow">${roleTitle}</p><h1>Sign in</h1>
-      <form id="login">
+  mountAuth(`<main class="auth-form-panel">
+    <header class="auth-heading">
+      <p class="eyebrow">${roleTitle}</p>
+      <h1 id="auth-title" tabindex="-1">Sign in</h1>
+      <p id="auth-description">Enter your account details to continue.</p>
+    </header>
+    <form id="login" class="auth-form" data-step="password">
+      <div id="sign-in-credentials" class="auth-fields">
         <label>Mobile number or email<input required name="identifier" autocomplete="username" autocapitalize="none" maxlength="254"></label>
-        <div class="password-entry">
+        <div>
           <label for="password">Password</label>
           <div class="password-input">
-            <input id="password" required name="password" type="password" autocomplete="current-password">
+            <input id="password" required name="password" type="password" autocomplete="current-password" maxlength="200">
             <button id="password-toggle" class="password-toggle" type="button" aria-controls="password">Show password</button>
           </div>
         </div>
-        <div id="sign-in-verification" hidden>
-          <label>Authenticator or recovery code<input name="code" autocomplete="one-time-code" maxlength="40" disabled></label>
-        </div>
-        <div class="form-error" role="alert">${safe(message)}</div>
-        <button class="primary">Sign in ${icon("arrow")}</button>
-      </form>
-      ${demoMode ? '<button id="demo" type="button" class="text-button">Fill demo sign-in</button>' : ""}
-    </main>
-  </div>`;
+      </div>
+      <div id="sign-in-verification" hidden>
+        <label>Authenticator or recovery code<input name="code" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" maxlength="40" disabled></label>
+      </div>
+      <div class="form-error" role="alert">${safe(message)}</div>
+      <button class="primary auth-primary">
+        <span class="auth-password-label">Sign in</span><span class="auth-verification-label">Verify and sign in</span>${icon("arrow")}
+      </button>
+      <button id="auth-back" type="button" class="text-button auth-back" hidden>Back to sign in</button>
+    </form>
+    ${demoMode ? '<button id="demo" type="button" class="text-button auth-demo">Fill demo sign-in</button>' : ""}
+  </main>`);
   const login = document.querySelector("#login");
   if (message) login.elements.identifier.focus();
   const toggle = document.querySelector("#password-toggle");
@@ -116,13 +150,33 @@ function showLogin(message = "") {
     login.elements.password.value = role === "owner" ? "OwnerDemo123!" : "ManagerDemo123!";
     login.querySelector(".primary").focus();
   });
+  const showVerification = active => {
+    login.dataset.step = active ? "verification" : "password";
+    document.querySelector("#auth-title").textContent = active ? "Verify your sign-in" : "Sign in";
+    document.querySelector("#auth-description").textContent = active
+      ? "Enter the six-digit code from your authenticator app, or use a recovery code."
+      : "Enter your account details to continue.";
+    document.querySelector("#sign-in-credentials").hidden = active;
+    document.querySelector("#sign-in-verification").hidden = !active;
+    document.querySelector("#auth-back").hidden = !active;
+    if (demoButton) demoButton.hidden = active;
+    login.elements.code.disabled = !active;
+    login.elements.code.required = active;
+    if (active) {
+      login.elements.password.type = "password";
+      toggle.textContent = "Show password";
+      login.elements.code.focus();
+    } else {
+      login.elements.code.value = "";
+      login.querySelector(".form-error").textContent = "";
+      login.elements.identifier.focus();
+    }
+  };
+  listen("auth-back", () => showVerification(false));
   bindForm("login", async form => {
     const result = await api("/login", fields(form));
     if (result.mfa_required) {
-      document.querySelector("#sign-in-verification").hidden = false;
-      form.elements.code.disabled = false;
-      form.elements.code.required = true;
-      form.elements.code.focus();
+      showVerification(true);
       return;
     }
     await showHome();
