@@ -13,3 +13,5 @@ services:
         sync: false
       - key: TURSO_AUTH_TOKEN
         sync: false
+      - key: MFA_ENCRYPTION_KEY
+        generateValue: true
