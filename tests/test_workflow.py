@@ -478,10 +478,12 @@ class HostedTest(unittest.TestCase):
         credentials = {"identifier": "9000000001", "password": "OwnerFixture-2026!"}
         login = "/api/owner/login"
         self.assertEqual(browser.request(login, credentials)[0], 200)
-        with patch("mfa.time.time", return_value=1_800_000_000):
+        from time import time
+        current = int(time())
+        with patch("mfa.time", return_value=current):
             status, setup = browser.request("/api/owner/mfa/setup", {"password": credentials["password"]})
             self.assertEqual(status, 200, setup)
-            code = totp(setup["setup_key"], 1_800_000_000 // 30)
+            code = totp(setup["setup_key"], current // 30)
             status, enabled = browser.request("/api/owner/mfa/enable", {"code": code})
             self.assertEqual(status, 200, enabled)
         restarted = Browser(create_app(env=env), "pump.onrender.com", "https://pump.onrender.com")

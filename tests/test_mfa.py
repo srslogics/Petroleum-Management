@@ -1,6 +1,7 @@
 """Authenticator enrollment, replay protection and account recovery."""
 import base64
 import json
+from time import time
 from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -21,7 +22,7 @@ class MFAWorkflowTest(TestCase):
         self.database = Path(temp.name) / "mfa.sqlite3"
         self.key = Fernet.generate_key().decode()
         self.app = create_app(self.database, env={"MFA_ENCRYPTION_KEY": self.key})
-        self.clock = self.enterContext(patch("mfa.time.time", return_value=1_800_000_000))
+        self.clock = self.enterContext(patch("mfa.time", return_value=int(time())))
 
     def credentials(self, role):
         return {"email": role + "@demo.local", "password": {"owner": "OwnerDemo123!", "manager": "ManagerDemo123!"}[role]}

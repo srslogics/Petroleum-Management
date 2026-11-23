@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import re
 import secrets
-import time
+from time import time
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -54,7 +54,7 @@ def totp(seed, step):
 def matching_step(seed, code, last_step):
     if not isinstance(code, str) or not re.fullmatch(r"[0-9]{6}", code):
         return None
-    current = int(time.time()) // 30
+    current = int(time()) // 30
     for step in (current, current - 1, current + 1):
         if step > last_step and hmac.compare_digest(totp(seed, step), code):
             return step
@@ -126,7 +126,7 @@ class MFA:
         with transaction(db, immediate=True):
             current = db.execute("""SELECT u.salt FROM sessions s JOIN users u ON u.id = s.user_id
                                    WHERE s.token_hash = ? AND s.user_id = ? AND s.expiry > ?""",
-                                 (session_hash, user_id, int(time.time()))).fetchone()
+                                 (session_hash, user_id, int(time()))).fetchone()
             if not current or (route != "/mfa/enable" and current["salt"] != password_account):
                 self.fail("Sign in again to manage verification.", 401)
             factor = self.factor(db, user_id)
@@ -145,12 +145,12 @@ class MFA:
                 db.execute("""INSERT INTO mfa_enrollments VALUES (?, ?, ?, ?)
                             ON CONFLICT(user_id) DO UPDATE SET session_hash=excluded.session_hash,
                             encrypted_seed=excluded.encrypted_seed, expires_at=excluded.expires_at""",
-                           (user_id, session_hash, self.encrypt(user_id, seed), int(time.time()) + 600))
+                           (user_id, session_hash, self.encrypt(user_id, seed), int(time()) + 600))
                 return {"setup_key": seed}
             else:
                 pending = db.execute("""SELECT encrypted_seed FROM mfa_enrollments WHERE user_id = ?
                                        AND session_hash = ? AND expires_at > ?""",
-                                     (user_id, session_hash, int(time.time()))).fetchone()
+                                     (user_id, session_hash, int(time()))).fetchone()
                 if not pending:
                     self.fail("Setup expired. Start setup again.", 409)
                 seed = self.decrypt(user_id, pending["encrypted_seed"])
