@@ -83,7 +83,7 @@ If your dashboard offers **New → Blueprint**, you can import `render.yaml` fro
 - Expected cash equals cash collections minus till expenses. Cash difference equals actual counted cash minus expected cash. The shift starts with zero opening cash float for this version.
 - Collections include cash, UPI, card and credit. Enter credit sales in the credit category. Collections difference equals total recorded collections and credit minus metered sales. Differences are saved for review, including shortages and overages.
 - Enter one delivery total and an optional physical closing reading for each fuel per shift. Calculated stock equals the starting balance plus submitted deliveries minus submitted metered sales. The latest physical reading is shown separately and does not adjust the calculated balance.
-- Submitting locks a shift's figures. An owner can correct the latest report with a reason while no later shift, bank reconciliation, credit allocation or customer repayment depends on it. Original figures and correction history are retained, and the previous review is cleared. Closing inputs are saved on submission and need to be re-entered if the manager refreshes before submitting.
+- Submitting locks a shift's figures. An owner can correct the latest report with a reason while no later shift, bank reconciliation, credit allocation or customer repayment depends on it. Original figures and correction history are retained, and the previous review is cleared. Manager closing entries are saved as an editable draft before submission; successful submission clears that draft.
 
 ## Verify the workflow
 
@@ -109,7 +109,7 @@ The test starts a local server on an available port with a temporary SQLite data
 
 Open `/owner` or `/manager` on the Render HTTPS URL, then tap **Install app**. Supported Android browsers show an installation prompt. In Safari on iPhone, use **Share → Add to Home Screen**. Each role has its own install identity and starts at its own sign-in page.
 
-An installed app requires internet access for sign-in, reports and saving operations. Offline launches show a connection screen. The app displays an offline notice if the connection drops while entering a shift. Keep that page open to retain unsaved entries, then reconnect and check whether the shift was submitted before trying again. The service worker stores only the public offline screen, its typography assets and installation images.
+An installed app requires internet access for sign-in, reports and saving operations. Offline launches show a connection screen. The app displays an offline notice if the connection drops while entering a shift. Manager edits are mirrored in the current tab when browser storage is available; keep the page open, reconnect and retry Save now. Saved online drafts restore after sign-in. Offline launches still show the connection screen; there is no offline submission. Check whether the shift was submitted before trying again. The service worker stores only the public offline screen, its typography assets and installation images.
 
 ## Social link previews
 
@@ -121,9 +121,15 @@ Share `/owner` with the owner and `/manager` with station managers. The root URL
 
 ## Manager shift entries
 
-In an open shift, the manager can add payment transactions or settlement batches, individual fuel deliveries, and till expenses. Payment entries include method, amount, customer/account, reference and notes. Credit requires a customer name. Deliveries include fuel, litres, supplier/tanker and invoice/challan reference. Expenses include amount, payee, reference and description. Physical stock measurements and handover notes are entered at closing.
+The Manager app is an entry workspace with **Meters & stock**, **Collections**, **Deliveries** and **Expenses**. Managers enter cash, UPI and card totals without customer details. Credit belongs to the owner; the manager API rejects credit amounts and customer names on payment batches. Any collections-versus-sales difference stays visible for the owner to reconcile, without requiring managers to explain owner-managed credit.
 
-If detailed entries exist for a payment method or fuel, the server derives that total from those entries. Otherwise the direct total is used. Enter all entries for a method when using that detail list. Expense entries replace the direct expense total. All submitted entries and handover notes appear in the owner's shift report, daily report and CSV export. Closing form entries are saved on submission.
+Managers can enter delivery/expense totals directly, or optionally record individual deliveries with supplier/challan details and till expenses with a payee and description. Optional payment batches capture cash, UPI or card amounts and references without identifying motorists. Detailed entries replace their method/fuel/expense total; the total becomes read-only while entries exist. Switching a batch method or removing the final entry restores the previous direct total. All submitted entries and notes appear in owner reports and CSV exports.
+
+Entries auto-save online after a short pause, with **Save now** and a visible status. Incomplete drafts can contain blank readings or unfinished rows; final submission still validates all amounts and required fields. Drafts are scoped to the station and open shift, include who last saved them, survive application restarts, and never change reports or stock until submission. Concurrent editors use version checks: a stale save or submission is rejected, and **Load saved draft** explicitly replaces the current editor with the latest saved entries.
+
+A same-tab browser-session mirror keeps unsaved edits through refresh or temporary connection failures when storage is available. It is keyed by manager account, station and shift; it is not stored in the service worker. Unsaved edits trigger a browser navigation warning. A storage failure is reported if online saving also fails. Online drafts are shared by managers working on the same station shift; unsaved tab edits are not shared across devices. Completed drafts are cleared when their shift submits.
+
+The optional **cash denomination counter** calculates counted cash from note/coin quantities and other cash. **Review entries** validates and shows a read-only summary of readings, collections, physical stock, deliveries, expenses and notes. Managers can return to editing; only **Submit shift closing** locks the report. Failed saves/submissions retain the form. Owner report corrections continue to support credit and customer information; owner-authorized shift completion also uses the full submission endpoint.
 
 ## Owner business controls
 
@@ -131,7 +137,7 @@ The owner navigation includes **Money**, **Operations** and **Exceptions** along
 
 ### Customer credit and repayments
 
-In **Money**, named credit entries from submitted shifts create customer balances. Customer names are matched without letter case; managers should consistently use the same account name. Use **Add customer** to create an account. Open a customer and choose **Set due date** to update its account-level payment date. Each customer has a transaction statement and CSV download. Outstanding balances past their due date appear in Exceptions.
+In **Money**, named credit entries from submitted shifts create customer balances. Customer names are matched without letter case; owners should consistently use the same account name. Use **Add customer** to create an account. Open a customer and choose **Set due date** to update its account-level payment date. Each customer has a transaction statement and CSV download. Outstanding balances past their due date appear in Exceptions.
 
 Credit entered only as a shift total remains visibly **unallocated**. Assign that credit to one or more customers in Money, within the remaining balance, using unique allocation references. Allocations do not change the shift's sales or collections.
 

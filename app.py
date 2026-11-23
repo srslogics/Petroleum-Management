@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, urlsplit
 from wsgiref.simple_server import WSGIServer, make_server
 from zoneinfo import ZoneInfo
 
+from manager_drafts import DRAFT_SCHEMA, draft_route
 from outgoings import OUTGOING_SCHEMA, outgoing_route
 from database import TursoDatabase, execute_many, open_db, read_snapshot, transaction
 
@@ -126,11 +127,12 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 """
 
-SCHEMA += OUTGOING_SCHEMA
+SCHEMA += OUTGOING_SCHEMA + DRAFT_SCHEMA
 
 STATIC_FILES = {
     "/app.js": "text/javascript", "/styles.css": "text/css", "/workspace.css": "text/css", "/daily-report.js": "text/javascript",
     "/typography.css": "text/css", "/money.css": "text/css", "/money.js": "text/javascript", "/outgoings.js": "text/javascript", "/outgoings.css": "text/css",
+    "/manager-workflow.js": "text/javascript", "/manager-workflow.css": "text/css",
     "/fonts/inter-latin.woff2": "font/woff2", "/fonts/inter-latin-ext.woff2": "font/woff2",
     "/tuljai-logo.jpg": "image/jpeg",
     "/manager-entries.js": "text/javascript",
@@ -441,6 +443,16 @@ def submit_shift(db, user, shift_id, body, *, revision=False):
                 fail("This report changed while you were editing. Reopen it before correcting the figures.", 409)
         mapping(body.get("entries", {}), "shift entries", ("payments", "deliveries", "expenses"))
         entries = shift_entries(body)
+        if user["role"] == "manager":
+            if any(entry["method"] == "credit" or entry["party"] for entry in entries["payments"]):
+                fail("Managers record cash, UPI and card without customer details. Credit is recorded by the owner.")
+            credit = body.get("collections", {}).get("credit") if isinstance(body.get("collections"), dict) else None
+            if credit not in (None, "") and number(credit, 2, "credit") != 0:
+                fail("Credit is recorded by the owner, not the manager.")
+            saved = db.execute("SELECT version FROM manager_shift_drafts WHERE shift_id = ? AND station_id = ?", (shift_id, sid)).fetchone()
+            if saved or "draft_version" in body:
+                if type(body.get("draft_version")) is not int or body.get("draft_version") != (saved["version"] if saved else 0):
+                    fail("This draft changed elsewhere. Reload the saved entries before submitting.", 409)
         draft = json.loads(row["opening_json"])
         closings = mapping(body.get("closings"), "closing readings", (str(n["id"]) for n in draft["nozzles"]))
         collections_input = mapping(body.get("collections"), "collections", METHODS)
@@ -495,6 +507,8 @@ def submit_shift(db, user, shift_id, body, *, revision=False):
         else:
             db.execute("""UPDATE shifts SET submitted_at = ?, submitted_by = ?, report_json = ? WHERE id = ?""",
                        (now(), user["id"], json.dumps(payload), shift_id))
+        if not revision:
+            db.execute("DELETE FROM manager_shift_drafts WHERE shift_id = ? AND station_id = ?", (shift_id, sid))
         return report(db, sid, shift_id)
 
 
@@ -1062,8 +1076,8 @@ class Request:
             fail("Sign in to continue.", 401)
         data = None
         if method == "POST":
-            closing_shift = ((role == "manager" and re.fullmatch(r"/shifts/[0-9]{1,18}/submit", route))
-                             or (role == "owner" and re.fullmatch(r"/shifts/[0-9]{1,18}/revise", route)))
+            closing_shift = ((role == "manager" and re.fullmatch(r"/shifts/[0-9]{1,18}/(submit|draft)", route))
+                             or (role == "owner" and re.fullmatch(r"/shifts/[0-9]{1,18}/(revise|submit)", route)))
             data = self.payload(SHIFT_BODY_LIMIT if closing_shift else JSON_BODY_LIMIT)
         with closing(open_db(self.database)) as db:
             if login:
@@ -1129,6 +1143,10 @@ class Request:
             return result, None
 
     def shift_route(self, db, user, role, method, route, data):
+        if role == "manager":
+            draft = draft_route(db, user, method, route, data, fail=fail, note=note, now=now)
+            if draft is not None:
+                return draft
         if role == "owner":
             control = owner_control_route(db, user, method, route, data)
             if control is not None:
@@ -1142,7 +1160,7 @@ class Request:
         match = re.fullmatch(r"/shifts/([0-9]{1,18})(/submit|/review)?", route)
         if match:
             shift_id, action = int(match[1]), match[2]
-            if role == "manager" and method == "POST" and action == "/submit":
+            if role in ("manager", "owner") and method == "POST" and action == "/submit":
                 return submit_shift(db, user, shift_id, data)
             if role == "owner" and method == "GET" and action is None:
                 return report(db, user["station_id"], shift_id)

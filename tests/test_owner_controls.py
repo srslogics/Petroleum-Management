@@ -38,7 +38,7 @@ class OwnerControlsTest(unittest.TestCase):
                 'counted':'90', 'expenses':'10', 'physical':{'Petrol':'7989'}, 'shift_note':'Check pump'}
         if detailed:
             body['entries'] = {'payments':[{'method':'credit','amount':'400','party':'Fleet A','reference':'INV-1'}]}
-        result = self.call(f"/api/manager/shifts/{active['id']}/submit", body)
+        result = self.call(f"/api/owner/shifts/{active['id']}/submit", body)
         body["expected_version"] = result["version"]
         return result, body
 

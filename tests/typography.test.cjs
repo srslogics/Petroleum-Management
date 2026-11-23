@@ -84,7 +84,8 @@ test('typography stays consistent across roles, reports, phone layouts and offli
   await audit('owner-sign-in');
   await post('manager/login',{email:'manager@demo.local',password:'ManagerDemo123!'});
   await post('manager/shift',{openings:{1:100,2:200}});
-  await post('manager/shifts/1/submit',{closings:{1:110,2:210},collections:{cash:100,upi:200,card:300},expenses:10,counted:90,
+  await post('owner/login',{email:'owner@demo.local',password:'OwnerDemo123!'});
+  await post('owner/shifts/1/submit',{closings:{1:110,2:210},collections:{cash:100,upi:200,card:300},expenses:10,counted:90,
     entries:{payments:[{method:'credit',amount:400,party:'Fleet A',reference:'INV-1'}]}});
   await page.getByRole('button',{name:'Fill demo sign-in'}).click();
   await page.getByRole('button',{name:'Sign in',exact:true}).click();
@@ -121,9 +122,12 @@ test('typography stays consistent across roles, reports, phone layouts and offli
   await page.getByRole('heading',{name:'Open a shift',exact:true}).waitFor();
   await audit('manager-opening');
   await page.getByRole('button',{name:'Open shift',exact:true}).click();
-  await page.getByRole('heading',{name:'Close shift',exact:true}).waitFor();
-  await page.getByRole('button',{name:'Add entry',exact:true}).nth(1).click();
+  await page.getByRole('heading',{name:'Shift entries',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Collections',exact:true}).click();
+  await page.locator('.manager-optional summary').filter({hasText:'Payment batch'}).click();
+  await page.getByRole('button',{name:'Add entry',exact:true}).click();
   await audit('manager-closing');
+  for(const name of ['Meters & stock','Deliveries','Expenses']){await page.getByRole('button',{name,exact:true}).click();await audit('manager-'+name);}
   await page.getByRole('button',{name:'Owner requests',exact:true}).click();
   await page.getByRole('heading',{name:'Owner requests',exact:true}).waitFor();
   await audit('manager-requests');

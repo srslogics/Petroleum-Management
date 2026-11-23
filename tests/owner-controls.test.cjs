@@ -57,7 +57,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   await tank.getByLabel('Low stock warning at or below (L)').fill('8000');
   await tank.getByRole('button',{name:'Save Petrol tank'}).click();
   await page.getByRole('heading',{name:'Operations',exact:true}).waitFor();
-  await post('manager/shifts/1/submit',{closings:{1:110,2:210},collections:{cash:100,upi:200,card:300},expenses:10,counted:90,
+  await post('owner/shifts/1/submit',{closings:{1:110,2:210},collections:{cash:100,upi:200,card:300},expenses:10,counted:90,
     entries:{payments:[{method:'credit',amount:400,party:'Fleet A',reference:'INV-1'}]}});
 
   // A correction request is answered by the manager, applied by the owner, and audited.
@@ -87,7 +87,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   await page.getByText('Shift #1 · Closed',{exact:false}).waitFor();
 
   await post('manager/shift',{openings:{}});
-  await post('manager/shifts/2/submit',{closings:{1:111,2:211},collections:{credit:50},counted:0});
+  await post('owner/shifts/2/submit',{closings:{1:111,2:211},collections:{credit:50},counted:0});
   await page.getByRole('button',{name:'Money',exact:true}).click();
   await page.getByRole('button',{name:'Assign credit',exact:false}).click();
   const allocation = page.getByRole('dialog');

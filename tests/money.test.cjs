@@ -34,7 +34,7 @@ test('Money supports empty states, customer search, focused payments, banking an
   await page.getByRole('button',{name:'Open account for Fleet A',exact:true}).waitFor();
   await post('manager/login',{email:'manager@demo.local',password:'ManagerDemo123!'});
   await post('manager/shift',{openings:{1:100,2:200}});
-  await post('manager/shifts/1/submit',{closings:{1:110,2:210},collections:{cash:100,upi:100,card:100},counted:90,expenses:10,
+  await post('owner/shifts/1/submit',{closings:{1:110,2:210},collections:{cash:100,upi:100,card:100},counted:90,expenses:10,
     entries:{payments:[{method:'credit',amount:100,party:'Fleet A'},{method:'credit',amount:200,party:'Fleet B'}]}});
   await post('owner/customers',{name:'Fleet B',due_date:'2026-11-21'});
   await page.getByRole('button',{name:'Overview',exact:true}).click();await page.getByRole('button',{name:'Money',exact:true}).click();

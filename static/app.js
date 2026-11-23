@@ -120,6 +120,7 @@ function showLogin(message = "") {
 }
 
 function shell(content, view = "home") {
+  stopManagerDraft?.();
   const navigation = role === "owner"
     ? [["home", "Overview"], ["daily-report", "Daily report"], ["money", "Money"], ["payroll", "Payroll"], ["payables", "Payables"], ["operations", "Operations"], ["exceptions", "Exceptions"], ["settings", "Settings"], ["team", "Team"]]
     : [["home", "Shift operations"], ["requests", "Owner requests"]];
@@ -243,13 +244,14 @@ async function showHome() {
   const state = await api(role === "manager" ? "/shift" :
     "/dashboard" + (selectedDate ? "?date=" + encodeURIComponent(selectedDate) : ""));
   session = state.session;
+  if (role === "manager" && state.active) state.active.draft = await api("/shifts/" + state.active.id + "/draft");
   if (role === "manager") showManager(state);
   else await showOwner(state);
 }
 
 function showManager(state) {
   if (state.active) {
-    showClosing(state.active);
+    showManagerEntry(state.active);
     return;
   }
   const setup = state.setup;
@@ -285,7 +287,7 @@ function showManager(state) {
     const openings = Object.fromEntries(setup.nozzles.map(nozzle => [nozzle.id, values["opening_" + nozzle.id]]));
     const active = await api("/shift", { openings });
     lastSubmission = undefined;
-    showClosing(active);
+    showManagerEntry(active);
   });
 }
 
@@ -402,7 +404,7 @@ function updatePreview(form, active) {
   }
   const sales = hasAllReadings ? fuelNames.reduce((total, fuel) =>
     total + Number((sold[fuel] * BigInt(active.rates[fuel]) + 500n) / 1000n), 0) : null;
-  const collections = Object.keys(methodNames).map(key => inputAmount(form, key, 100));
+  const collections = Object.keys(methodNames).filter(key => form.elements[key]).map(key => inputAmount(form, key, 100));
   const collectionTotal = collections.includes(null) ? null : collections.reduce((total, amount) => total + amount, 0);
   const cash = collections[0];
   const expenses = inputAmount(form, "expenses", 100);
