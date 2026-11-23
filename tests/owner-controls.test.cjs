@@ -49,6 +49,22 @@ test('owner controls work through desktop and mobile screens', async t => {
   await page.goto(origin + '/owner');
   await page.getByRole('button',{name:'Fill demo sign-in'}).click();
   await page.getByRole('button',{name:'Sign in',exact:true}).click();
+  await page.getByRole('button',{name:'WhatsApp',exact:true}).click();
+  const compose = page.getByRole('dialog',{name:'Send with WhatsApp'});
+  await compose.getByLabel('WhatsApp number (optional)').fill('9000000002');
+  await compose.getByRole('button',{name:'Open WhatsApp'}).click();
+  await compose.getByText('Enter a mobile number starting with + and its country code.').waitFor();
+  await compose.getByLabel('WhatsApp number (optional)').fill('+91 90000-00002');
+  await compose.getByLabel('Message',{exact:true}).fill('Hello & welcome!');
+  await context.route('https://wa.me/**', route => route.fulfill({body:'WhatsApp test page'}));
+  const popupEvent = page.waitForEvent('popup');
+  await compose.getByRole('button',{name:'Open WhatsApp'}).click();
+  const popup = await popupEvent;
+  const destination = new URL(popup.url());
+  assert.equal(destination.origin + destination.pathname, 'https://wa.me/919000000002');
+  assert.equal(destination.searchParams.get('text'), 'Hello & welcome!');
+  await popup.close();
+  await compose.getByRole('button',{name:'Close dialog'}).click();
   await page.getByRole('button',{name:'View operations',exact:true}).click();
   await page.getByRole('heading',{name:'Current open shift'}).waitFor();
   assert.match(await page.locator('main').textContent(),/Asha Patil/);
@@ -155,7 +171,21 @@ test('owner controls work through desktop and mobile screens', async t => {
   await page.locator('#exception-filter').selectOption('all');
   await page.getByText('Investigating with manager',{exact:false}).waitFor({state:'attached'});
 
+  await page.getByRole('button',{name:'Automation',exact:true}).click();
+  await page.getByRole('tab',{name:'Alerts',exact:true}).click();
+  const fleetReminder = page.getByRole('row').filter({hasText:'Fleet B'});
+  await fleetReminder.getByRole('button',{name:'Open reminder',exact:true}).click();
+  const reminder = page.getByRole('dialog',{name:'Payment reminder'});
+  const reminderText = await reminder.locator('#auto-reminder-text').inputValue();
+  const reminderUrl = new URL(await reminder.getByRole('link',{name:'Open WhatsApp',exact:true}).getAttribute('href'));
+  assert.equal(reminderUrl.origin + reminderUrl.pathname, 'https://wa.me/');
+  assert.equal(reminderUrl.searchParams.get('text'), reminderText);
+  await reminder.getByRole('button',{name:'Close dialog'}).click();
+
+  await post('owner/managers',{name:'Mobile Manager',phone:'+91 90000-00002',password:'ManagerTestPassword123!'});
   await page.getByRole('button',{name:'Team',exact:true}).click();
+  await page.locator('summary').filter({hasText:'Mobile Manager'}).click();
+  assert.equal(await page.getByRole('link',{name:'WhatsApp Mobile Manager',exact:true}).getAttribute('href'), 'https://wa.me/919000000002');
   const account = page.locator('.business-record').filter({has:page.locator('summary',{hasText:'Asha Patil'})});
   await account.locator('summary').click();
   await account.getByRole('button',{name:'Deactivate manager',exact:true}).click();

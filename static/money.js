@@ -48,7 +48,7 @@ function showMoney(data) {
         ${activity.length ? `<div class="table-scroll money-table-wrap" id="money-activity-table"><table class="money-table"><thead><tr><th>Date</th><th>Entry</th><th>Reference</th><th class="numeric">Amount</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${activity.map((item,index)=>`<tr data-money-activity="${index}" data-search="${safe((item.reference+' '+item.party).toLocaleLowerCase())}" data-void="${Boolean(item.void)}"><td>${safe(item.date)}</td><th scope="row"><button id="money-activity-source-${index}" type="button" class="money-source-link" aria-label="Open entry ${safe(item.reference)}">${item.title}<small>${safe(item.party)}</small><small class="money-mobile-line">${safe(item.reference)} · ${safe(item.date)} · ${item.void ? 'Voided' : 'Recorded'}</small></button></th><td>${safe(item.reference)}</td><td class="numeric"><strong>${money(item.amount)}</strong></td><td>${moneyBadge(item.void ? 'Voided' : 'Recorded',item.void ? 'neutral' : 'positive')}</td><td><button id="money-activity-${index}" class="text-button" type="button">View entry</button></td></tr>`).join('')}</tbody></table></div><div id="money-no-activity" hidden>${moneyEmpty('No matching entries','Try another reference or change the status filter.')}</div>` : moneyEmpty('Your money trail starts here','Recorded payments, settlements and deposits will appear in this list.')}
       </div>
       <footer class="money-panel-footer"><span>All dates · Amounts in INR</span><span>Updated ${safe(timestamp(new Date().toISOString()))}</span><button id="money-mobile-help" class="text-button" type="button">Money help</button></footer>
-    </section><dialog id="money-dialog" aria-labelledby="money-dialog-title"></dialog>`, 'money');
+    </section>`, 'money');
   listen('money-add-customer',()=>openCustomerForm(data));
   if (!data.customers.length) listen('money-first-customer',()=>openCustomerForm(data));
   listen('money-record-payment',()=>openPaymentForm(data));
@@ -106,9 +106,13 @@ function openCustomerForm(data,customer=null) {
 }
 function openCustomerAccount(data,item) {
   moneyDialog(item.name,`<div class="money-account-balance"><span>Outstanding balance</span><strong>${money(item.balance)}</strong>${item.overdue ? moneyBadge('Overdue','warning') : ''}</div>
-    <div class="money-account-actions"><button id="money-account-payment" class="primary" type="button" ${item.balance>0 ? '' : 'disabled'}>Record payment</button><button id="money-account-export" class="secondary" type="button">Export statement</button><button id="money-account-due" class="text-button" type="button">Set due date</button></div>
+    <div class="money-account-actions"><button id="money-account-payment" class="primary" type="button" ${item.balance>0 ? '' : 'disabled'}>Record payment</button><button id="money-account-export" class="secondary" type="button">Export statement</button>${item.balance > 0 ? '<button id="money-account-whatsapp" class="secondary" type="button">WhatsApp reminder</button>' : ""}<button id="money-account-due" class="text-button" type="button">Set due date</button></div>
     <dl class="money-account-summary"><div><dt>Credit sales</dt><dd>${money(item.sales)}</dd></div><div><dt>Payments received</dt><dd>${money(item.repaid)}</dd></div><div><dt>Payment due</dt><dd>${safe(item.due_date || 'Not set')}</dd></div></dl>
     <h3>Account activity</h3><div class="table-scroll"><table class="money-table"><thead><tr><th>Date</th><th>Entry</th><th class="numeric">Amount</th></tr></thead><tbody>${item.transactions.map(row=>`<tr><td>${safe(row.date)}</td><td>${safe(row.type)}<small>${safe(row.reference)}${row.note ? ' · '+safe(row.note) : ''}</small></td><td class="numeric">${money(row.amount)}</td></tr>`).join('')}</tbody></table></div>`,true);
+  if (item.balance > 0) listen('money-account-whatsapp', () => openWhatsAppComposer(
+    `Hello ${item.name}, this is a payment reminder from ${session.station}. Your outstanding balance is ${money(item.balance)}` +
+    (item.due_date ? `, due ${businessDay(item.due_date)}` : "") + ". Please share the payment reference once paid."
+  ));
   listen('money-account-payment',()=>openPaymentForm(data,item));listen('money-account-export',()=>downloadCustomerStatement(item,data.today));listen('money-account-due',()=>openCustomerForm(data,item));
 }
 function openPaymentForm(data,customer=null) {

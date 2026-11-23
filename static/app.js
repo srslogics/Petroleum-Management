@@ -205,10 +205,11 @@ function shell(content, view = "home") {
         <header class="workspace-header"><div class="header-inner">
           <div class="header-station"><strong>${safe(session.station)}</strong><small>${safe(session.station_code)}</small></div>
           <div class="account"><span class="account-avatar" aria-hidden="true">${safe(session.name.slice(0, 1))}</span><span class="account-name">${safe(session.name)}</span>
+            ${role === "owner" ? '<button id="whatsapp-compose" class="text-button" type="button">WhatsApp</button>' : ""}
             <button id="logout" class="sign-out" type="button">Sign out</button>
           </div>
         </div></header>
-        <main id="main-content" data-view="${view}" tabindex="-1" class="page"><p id="notice" role="alert" class="notice" hidden></p>${content}</main>
+        <main id="main-content" data-view="${view}" tabindex="-1" class="page"><p id="notice" role="alert" class="notice" hidden></p>${content}${role === "owner" ? '<dialog id="money-dialog" aria-labelledby="money-dialog-title"></dialog>' : ""}</main>
       </div>
     </div>`;
   if (installBar) document.querySelector('#sidebar-install').append(installBar);
@@ -234,6 +235,7 @@ function shell(content, view = "home") {
   listen("security", openAccountSecurity);
   if (role === "manager") listen("requests", openManagerRequests);
   if (role === "owner") {
+    listen("whatsapp-compose", () => openWhatsAppComposer());
     listen("settings", openSettings);
     listen("daily-report", openDailyReport);
     listen("team", openTeam);
@@ -509,7 +511,7 @@ function reviewStatus(shift) {
 
 function bindDateFilter(endpoint, render) {
   const control = document.querySelector("#date");
-  const buttons = [...document.querySelectorAll("#print-day, #export-day, #refresh-day")];
+  const buttons = [...document.querySelectorAll("#print-day, #export-day, #refresh-day, #whatsapp-day")];
   let request = 0;
   const update = async (refresh = false) => {
     if (!control.value) control.value = selectedDate;
@@ -706,8 +708,7 @@ function showTeam(managers, added = false) {
         <small id="manager-password-help">Use a password of 15–200 characters.</small>
         ${errorbox}<button class="primary">Create manager account</button>
       </form>
-    </section>
-    <dialog id="money-dialog" aria-labelledby="money-dialog-title"></dialog>`, "team");
+    </section>`, "team");
   listen("account-audit", async () => {
     const events = await api("/account-audit");
     const labels = {create: "Account created", disable: "Account disabled", enable: "Account enabled",

@@ -70,6 +70,13 @@ test('Manager entry drafts, simple totals, cash counter and final submission wor
   assert.equal(daily.fuels.Petrol.closing_stock, daily.fuels.Petrol.opening_stock + 90000);
   assert.equal(daily.fuels.Petrol.physical.litres, 8000000);
   assert.deepEqual(daily.shifts[0].entries, shift.entries);
+  await owner.getByRole('button', {name:'Share via WhatsApp'}).click();
+  const share = owner.getByRole('dialog', {name:'Send with WhatsApp'});
+  const message = await share.getByLabel('Message', {exact:true}).inputValue();
+  assert.match(message, /Metered fuel sales: ₹1,968\.00 · 20 L/);
+  assert.match(message, /Cash counted: ₹450\.00 · Cash difference: ₹0\.00/);
+  assert.ok(!message.includes('First tab note'));
+  await share.getByRole('button', {name:'Close dialog'}).click();
 
   await owner.getByRole('button', {name:'Shift #1', exact:true}).click();
   await owner.getByLabel('Review note').fill('Matched shift records');
@@ -101,11 +108,15 @@ test('Manager entry drafts, simple totals, cash counter and final submission wor
   try {
     await owner.waitForFunction(() => document.querySelector('#export-day')?.disabled);
     assert.equal(await owner.getByRole('button', {name:'Print', exact:true}).isDisabled(), true);
+    assert.equal(await owner.getByRole('button', {name:'Share via WhatsApp'}).isDisabled(), true);
   } finally {
     releaseDate();
   }
   await owner.getByText('No shifts were submitted for this business date.').waitFor();
   assert.equal(await owner.getByRole('button', {name:'Export CSV'}).isEnabled(), true);
+  await owner.getByRole('button', {name:'Share via WhatsApp'}).click();
+  assert.match(await share.getByLabel('Message', {exact:true}).inputValue(), /1 January 2020[\s\S]*No shifts were submitted/);
+  await share.getByRole('button', {name:'Close dialog'}).click();
   await owner.getByLabel('Business date').fill(shift.business_date);
   await owner.getByRole('button', {name:'Shift #1', exact:true}).waitFor();
   await owner.getByRole('button', {name:'Overview', exact:true}).click();

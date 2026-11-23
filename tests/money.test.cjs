@@ -66,6 +66,9 @@ test('Money supports empty states, customer search, focused payments, banking an
   const rowB=page.getByRole('row').filter({has:page.getByRole('button',{name:'Open account for Fleet B',exact:true})});
   assert.equal(await rowB.locator('td').nth(3).isVisible(),true);
   assert.match(await rowB.locator('td').nth(3).textContent(),/200.00/);
+  await page.getByRole('button',{name:'Open account for Fleet B',exact:true}).click();await dialog.getByRole('button',{name:'WhatsApp reminder',exact:true}).click();
+  assert.match(await dialog.getByLabel('Message',{exact:true}).inputValue(), /Fleet B.*₹200\.00, due 21 November 2026/);
+  await dialog.getByRole('button',{name:'Close dialog'}).click();
   await page.getByRole('button',{name:'Open account for Fleet B',exact:true}).click();await dialog.getByRole('button',{name:'Record payment',exact:true}).click();
   assert.equal(await dialog.getByLabel(/^Customer/).inputValue(),'fleet b');
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await page.keyboard.press('Escape');

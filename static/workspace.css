@@ -46,6 +46,7 @@ input:hover, textarea:hover, select:hover { border-color: #9ca9b5; }
 .workspace-header .header-station small { display: inline-block; padding: 3px 6px; background: #f6f7f9; color: #697585; border-radius: 4px; }
 .account { flex-wrap: nowrap; align-items: center; gap: 9px; }
 .account-avatar { display: grid; place-items: center; width: 29px; height: 29px; border-radius: 50%; background: #edf1f5; color: #627082; flex: none; }
+.whatsapp-link { display: inline-flex; width: fit-content; align-items: center; min-height: 44px; border-radius: var(--radius); text-decoration: none; }
 .account .account-name { display: inline; }
 .account .sign-out { min-height: 44px; margin-left: 7px; padding: 4px 8px; color: #697585; }
 .workspace-body .page { width: 100%; max-width: 1440px; padding: 30px 32px 48px; }
