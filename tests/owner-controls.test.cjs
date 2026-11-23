@@ -163,6 +163,11 @@ test('owner controls work through desktop and mobile screens', async t => {
   assert.equal((await context.request.get(origin + '/api/manager/shift')).status(),401);
 
   await page.setViewportSize({width:390,height:844});
+  await page.getByRole('button',{name:'Account activity',exact:true}).click();
+  const accountAudit = page.getByRole('dialog',{name:'Account activity'});
+  await accountAudit.getByText('Account disabled',{exact:true}).waitFor();
+  await accountAudit.getByRole('button',{name:'Close dialog'}).click();
+
   for (const nav of ['Overview','Money','Operations','Exceptions','Team']) {
     await page.getByRole('button',{name:nav,exact:true}).click();
     await page.waitForTimeout(150);

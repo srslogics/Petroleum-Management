@@ -468,12 +468,24 @@ class HostedTest(unittest.TestCase):
         self.addCleanup(transport.stop)
         transport.start()
 
+    def test_hosted_origin_allowlist_and_security_headers(self):
+        env = self.env | {"RENDER_EXTERNAL_URL": "https://pump.onrender.com",
+                          "PUBLIC_APP_URL": "https://station.example.com"}
+        app = create_app(env=env)
+        invalid = Browser(app, "other.example.com", "https://other.example.com")
+        self.assertEqual(invalid.request("/owner")[0], 400)
+        self.assertEqual(invalid.request("/healthz")[0], 200)
+        for host in ("pump.onrender.com", "station.example.com"):
+            browser = Browser(app, host, "https://" + host)
+            self.assertEqual(browser.request("/owner")[0], 200)
+            self.assertEqual(browser.response_headers["/owner"]["Strict-Transport-Security"], "max-age=31536000")
+
     def test_authenticated_screen_reads_use_two_database_requests(self):
         env = self.env
         database = TursoDatabase.from_env(env, required=True)
-        setup_owner(database, env, "9000000001", "TestOw7")
+        setup_owner(database, env, "9000000001", "OwnerFixture-2026!")
         browser = Browser(create_app(env=env), "pump.onrender.com", "https://pump.onrender.com")
-        self.assertEqual(browser.request("/api/owner/login", {"identifier": "9000000001", "password": "TestOw7"})[0], 200)
+        self.assertEqual(browser.request("/api/owner/login", {"identifier": "9000000001", "password": "OwnerFixture-2026!"})[0], 200)
         for path in ("/api/owner/dashboard", "/api/owner/daily-report", "/api/owner/settings", "/api/owner/business/operations", "/api/owner/payroll", "/api/owner/payables"):
             before = self.pipeline_count
             status, data = browser.request(path)
@@ -482,9 +494,9 @@ class HostedTest(unittest.TestCase):
                 self.assertEqual(data["session"]["role"], "owner")
                 self.assertNotIn("password_hash", data["session"])
         self.assertEqual(browser.request("/api/owner/managers", {
-            "name": "Test Manager", "phone": "9000000002", "password": "TestMg7",
+            "name": "Test Manager", "phone": "9000000002", "password": "ManagerFixture-2026!",
         })[0], 200)
-        self.assertEqual(browser.request("/api/manager/login", {"identifier": "9000000002", "password": "TestMg7"})[0], 200)
+        self.assertEqual(browser.request("/api/manager/login", {"identifier": "9000000002", "password": "ManagerFixture-2026!"})[0], 200)
         before = self.pipeline_count
         status, data = browser.request("/api/manager/shift")
         self.assertEqual((status, self.pipeline_count - before), (200, 2))
@@ -500,13 +512,13 @@ class HostedTest(unittest.TestCase):
 
     def test_configure_hosted_station_and_reopen_database(self):
         env = self.env
-        owner = {"identifier": "9000000001", "password": "TestOw7"}
-        manager = {"identifier": "9000000002", "password": "TestMg7"}
+        owner = {"identifier": "9000000001", "password": "OwnerFixture-2026!"}
+        manager = {"identifier": "9000000002", "password": "ManagerFixture-2026!"}
         browser = Browser(create_app(env=env), "pump.onrender.com", "https://pump.onrender.com")
         self.assertEqual(browser.request("/healthz"), (200, {"ok": True}))
         self.assertEqual(browser.request("/api/owner/login", owner)[0], 401)
         database = TursoDatabase.from_env(env, required=True)
-        with self.assertRaisesRegex(RuntimeError, "7–200 characters"):
+        with self.assertRaisesRegex(RuntimeError, "15–200 characters"):
             setup_owner(database, env, owner["identifier"], "TestOw")
         setup_owner(database, env, "+91 90000 00001", owner["password"])
         with self.assertRaisesRegex(RuntimeError, "An owner already exists"):
@@ -550,17 +562,17 @@ class HostedTest(unittest.TestCase):
 
     def test_hosted_owner_business_controls_persist(self):
         database = TursoDatabase.from_env(self.env, required=True)
-        setup_owner(database, self.env, "9000000001", "TestOw7")
+        setup_owner(database, self.env, "9000000001", "OwnerFixture-2026!")
         browser = Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
         def request(path, data=None):
             status, body = browser.request(path, data)
             self.assertEqual(status, 200, body)
             return body
-        request("/api/owner/login", {"identifier":"9000000001", "password":"TestOw7"})
-        request("/api/owner/managers", {"name":"Hosted Manager", "phone":"9000000002", "password":"TestMg7"})
+        request("/api/owner/login", {"identifier":"9000000001", "password":"OwnerFixture-2026!"})
+        request("/api/owner/managers", {"name":"Hosted Manager", "phone":"9000000002", "password":"ManagerFixture-2026!"})
         request("/api/owner/settings", {"rates":{"Petrol":"100", "Diesel":"90"}})
         request("/api/owner/tanks", {"fuel":"Petrol", "capacity":"10000", "low_level":"1000"})
-        request("/api/manager/login", {"identifier":"9000000002", "password":"TestMg7"})
+        request("/api/manager/login", {"identifier":"9000000002", "password":"ManagerFixture-2026!"})
         shift = request("/api/manager/shift", {"openings":{"1":0,"2":0}})
         request(f"/api/owner/shifts/{shift['id']}/submit", {
             "closings":{"1":1,"2":0}, "collections":{"upi":50}, "counted":0,
@@ -580,13 +592,13 @@ class HostedTest(unittest.TestCase):
 
     def test_hosted_automation_batches_and_approvals(self):
         database = TursoDatabase.from_env(self.env, required=True)
-        setup_owner(database, self.env, "9000000001", "TestOw7")
+        setup_owner(database, self.env, "9000000001", "OwnerFixture-2026!")
         browser = Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
         def request(path, data=None):
             status, body = browser.request('/api/owner' + path, data)
             self.assertEqual(status, 200, body)
             return body
-        request('/login', {'identifier':'9000000001','password':'TestOw7'})
+        request('/login', {'identifier':'9000000001','password':'OwnerFixture-2026!'})
         request('/payroll/staff', {'name':'Staff','code':'S1','monthly_salary':10000})
         request('/automation/rules', {'kind':'salary','name':'Monthly payroll','start_month':'2026-11','run_day':1,'due_day':28})
         draft=request('/automation')['drafts'][0]
@@ -611,16 +623,16 @@ class HostedTest(unittest.TestCase):
 
     def test_hosted_manager_drafts_persist_and_submit(self):
         database = TursoDatabase.from_env(self.env, required=True)
-        setup_owner(database, self.env, "9000000001", "TestOw7")
+        setup_owner(database, self.env, "9000000001", "OwnerFixture-2026!")
         browser = Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
         def request(path, data=None, expected=200):
             status, body = browser.request(path, data)
             self.assertEqual(status, expected, body)
             return body
-        request('/api/owner/login', {'identifier':'9000000001','password':'TestOw7'})
+        request('/api/owner/login', {'identifier':'9000000001','password':'OwnerFixture-2026!'})
         request('/api/owner/settings', {'rates':{'Petrol':100,'Diesel':90}})
-        request('/api/owner/managers', {'name':'Manager','phone':'9000000002','password':'TestMg7'})
-        request('/api/manager/login', {'identifier':'9000000002','password':'TestMg7'})
+        request('/api/owner/managers', {'name':'Manager','phone':'9000000002','password':'ManagerFixture-2026!'})
+        request('/api/manager/login', {'identifier':'9000000002','password':'ManagerFixture-2026!'})
         request('/api/manager/shift', {'openings':{'1':0,'2':0}})
         data={'values':{'closing_1':'1','closing_2':'','cash':'100','counted':''},'entries':{}}
         request('/api/manager/shifts/1/draft', {'version':0,'data':data})
@@ -636,13 +648,13 @@ class HostedTest(unittest.TestCase):
 
     def test_hosted_outgoing_ledgers_persist(self):
         database = TursoDatabase.from_env(self.env, required=True)
-        setup_owner(database, self.env, "9000000001", "TestOw7")
+        setup_owner(database, self.env, "9000000001", "OwnerFixture-2026!")
         browser = Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
         def request(route, data=None, expected=200):
             status, body = browser.request('/api/owner' + route, data)
             self.assertEqual(status, expected, body)
             return body
-        request('/login', {'identifier':'9000000001','password':'TestOw7'})
+        request('/login', {'identifier':'9000000001','password':'OwnerFixture-2026!'})
         request('/payroll/staff', {'name':'Staff','code':'S1','monthly_salary':10000})
         request('/outgoings/payments', {'kind':'advance','source_id':1,'amount':1000,'paid_on':'2026-11-22','method':'bank','reference':'A1'})
         request('/payroll/salaries', {'staff_id':1,'period':'2026-11','amount':10000,'advance_applied':1000,'due_date':'2026-11-30'})
@@ -659,21 +671,21 @@ class HostedTest(unittest.TestCase):
     def test_reset_owner_preserves_account_and_revokes_sessions(self):
         env = self.env
         database = TursoDatabase.from_env(env, required=True)
-        setup_owner(database, env, "9000000001", "TestOw7")
+        setup_owner(database, env, "9000000001", "OwnerFixture-2026!")
         browser = Browser(create_app(env=env), "pump.onrender.com", "https://pump.onrender.com")
-        old = {"identifier": "9000000001", "password": "TestOw7"}
+        old = {"identifier": "9000000001", "password": "OwnerFixture-2026!"}
         self.assertEqual(browser.request("/api/owner/login", old)[0], 200)
         original_id = browser.request("/api/owner/session")[1]["id"]
         self.assertEqual(browser.request("/api/owner/managers", {
-            "name": "Test Manager", "phone": "9000000002", "password": "TestMg7",
+            "name": "Test Manager", "phone": "9000000002", "password": "ManagerFixture-2026!",
         })[0], 200)
         with self.assertRaisesRegex(RuntimeError, "different account"):
-            reset_owner(database, "9000000002", "TestOw8")
+            reset_owner(database, "9000000002", "OwnerFixture-Updated!")
         self.assertEqual(browser.request("/api/owner/session")[0], 200)
-        reset_owner(database, "+91 90000 00003", "TestOw8")
+        reset_owner(database, "+91 90000 00003", "OwnerFixture-Updated!")
         self.assertEqual(browser.request("/api/owner/session")[0], 401)
         self.assertEqual(browser.request("/api/owner/login", old)[0], 401)
-        self.assertEqual(browser.request("/api/owner/login", {"identifier": "9000000003", "password": "TestOw8"})[0], 200)
+        self.assertEqual(browser.request("/api/owner/login", {"identifier": "9000000003", "password": "OwnerFixture-Updated!"})[0], 200)
         self.assertEqual(browser.request("/api/owner/session")[1]["id"], original_id)
         self.assertEqual(len(browser.request("/api/owner/managers")[1]), 1)
 

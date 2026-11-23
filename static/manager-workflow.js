@@ -1,9 +1,21 @@
 "use strict";
 
 let stopManagerDraft = null;
+let saveManagerDraftBeforeLogout = null;
 const managerMethods = {cash:'Cash',upi:'UPI',card:'Card'};
 const managerDenominations = [500,200,100,50,20,10,5,2,1];
 const managerDraftKey = active => `tuljai-draft:${session.id}:${session.station_id}:${active.id}`;
+
+function clearManagerDrafts(account) {
+  const prefix = `tuljai-draft:${account.id}:${account.station_id}:`;
+  try {
+    for (const key of Object.keys(sessionStorage)) {
+      if (key.startsWith(prefix)) sessionStorage.removeItem(key);
+    }
+  } catch {
+    // Some browsers disable session storage.
+  }
+}
 
 function managerPayload(form,active) {
   const values=fields(form),byFuel=prefix=>Object.fromEntries(fuelNames.map(fuel=>[fuel,values[prefix+fuel]]));
@@ -59,7 +71,14 @@ function bindShiftDraft(form,active,saved,dirty,localConflict=false){
   let version=saved.version,changed=dirty,stopped=false,timer=null,inFlight=null,conflict=localConflict,failed=false;
   const status=document.querySelector('#manager-save-status'), key=managerDraftKey(active);
   let canMirror=true;
-  const mirror=()=>{try{sessionStorage.setItem(key,JSON.stringify({version,data:managerDraftData(form),dirty:changed,conflict}));}catch{canMirror=false;}};
+  const mirror = () => {
+    try {
+      if (changed) sessionStorage.setItem(key, JSON.stringify({version, data:managerDraftData(form), dirty:true, conflict}));
+      else sessionStorage.removeItem(key);
+    } catch {
+      canMirror = false;
+    }
+  };
   const message=text=>{if(!stopped)status.textContent=text;};
   const capture=()=>JSON.stringify(managerDraftData(form));
   const save=async()=>{
@@ -69,7 +88,7 @@ function bindShiftDraft(form,active,saved,dirty,localConflict=false){
     inFlight=(async()=>{try{
       const result=await api('/shifts/'+active.id+'/draft',{version,data:JSON.parse(data)});
       version=result.version;changed=capture()!==data;if(!stopped)mirror();message(changed?'Unsaved changes':'Saved '+timestamp(result.saved_at));
-    }catch(error){failed=true;if(error.status===409){conflict=true;mirror();if(!stopped)document.querySelector('#manager-load-draft')?.removeAttribute('hidden');message('Draft changed elsewhere. Load saved draft to continue.');}else message(canMirror?'Not saved online · kept in this tab. Retry save.':'Not saved. Keep this page open and retry.');
+    }catch(error){failed=true;if(error.status===409){conflict=true;if(!stopped)mirror();if(!stopped)document.querySelector('#manager-load-draft')?.removeAttribute('hidden');message('Draft changed elsewhere. Load saved draft to continue.');}else message(canMirror?'Not saved online · kept in this tab. Retry save.':'Not saved. Keep this page open and retry.');
     }finally{inFlight=null;}})();
     await inFlight;if(changed&&!failed&&!conflict&&!stopped)timer=setTimeout(save,1500);
   };
@@ -80,7 +99,11 @@ function bindShiftDraft(form,active,saved,dirty,localConflict=false){
   const unload=event=>{if(changed){mirror();event.preventDefault();event.returnValue='';}};
   window.addEventListener('beforeunload',unload);
   window.addEventListener('online',save);
-  stopManagerDraft=()=>{if(stopped)return;mirror();stopped=true;clearTimeout(timer);window.removeEventListener('beforeunload',unload);window.removeEventListener('online',save);};
+  saveManagerDraftBeforeLogout = async () => {
+    await save();
+    return !changed;
+  };
+  stopManagerDraft=()=>{if(stopped)return;mirror();stopped=true;saveManagerDraftBeforeLogout=null;clearTimeout(timer);window.removeEventListener('beforeunload',unload);window.removeEventListener('online',save);};
   message(dirty?'Restored unsaved entries from this tab':saved.data?'Draft restored · '+timestamp(saved.saved_at):'Ready for entries');
   if(conflict){document.querySelector('#manager-load-draft').hidden=false;message('Draft changed elsewhere. Your local edits are kept. Load saved draft to continue.');}
   else if(dirty)timer=setTimeout(save,500);
