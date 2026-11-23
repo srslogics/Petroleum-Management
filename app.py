@@ -1,6 +1,8 @@
 """Petroleum Management WSGI application."""
 import argparse
 import hashlib
+import gzip
+from collections import defaultdict
 from html import escape
 import json
 import logging
@@ -22,7 +24,7 @@ from wsgiref.simple_server import WSGIServer, make_server
 from zoneinfo import ZoneInfo
 
 from automation import AUTOMATION_SCHEMA, Automation, accept_feed
-from manager_drafts import DRAFT_SCHEMA, draft_route
+from manager_drafts import DRAFT_SCHEMA, draft_route, draft_query, unpack_draft
 from outgoings import OUTGOING_SCHEMA, outgoing_route
 from database import TursoDatabase, execute_many, open_db, read_snapshot, transaction
 
@@ -316,16 +318,16 @@ def open_shift_public(row):
 
 
 def manager_state(db, sid, *, in_write=False):
-    queries = [(OPEN_SHIFT_QUERY, (sid,)), *config_queries(sid), (LATEST_SHIFT_QUERY, (sid,))]
+    queries = [(OPEN_SHIFT_QUERY, (sid,)), *config_queries(sid), (LATEST_SHIFT_QUERY, (sid,)), draft_query(sid)]
     if in_write:
         active = get_open(db, sid)
         if active:
             return {"active": open_shift_public(active)}
-        fuels, nozzles, latest = [list(rows) for rows in execute_many(db, queries[1:])]
+        fuels, nozzles, latest = [list(rows) for rows in execute_many(db, queries[1:4])]
     else:
-        active, fuels, nozzles, latest = read_snapshot(db, queries)
+        active, fuels, nozzles, latest, draft = read_snapshot(db, queries)
         if active:
-            return {"active": open_shift_public(active[0])}
+            return {"active": open_shift_public(active[0]) | {"draft": unpack_draft(draft[0] if draft else None)}}
     current = unpack_config(fuels, nozzles)
     last = None
     readings = {}
@@ -530,13 +532,15 @@ def stock_query(sid, fuel):
 
 
 def owner_state(db, sid, selected):
-    fuels, nozzles, petrol, diesel, rows = read_snapshot(db, [
+    queries = [
         *config_queries(sid), *(stock_query(sid, fuel) for fuel in FUELS),
         ("""SELECT s.id, s.submitted_at, s.report_json, u.name AS submitter, r.reviewed_at
             FROM shifts s JOIN users u ON u.id = s.submitted_by LEFT JOIN reviews r ON r.shift_id = s.id
             WHERE s.station_id = ? AND s.business_date = ? AND s.submitted_at IS NOT NULL ORDER BY s.id DESC""",
          (sid, selected)),
-    ])
+    ]
+    fuels, nozzles, petrol, diesel, rows, *business_rows = read_snapshot(db, [*queries, *business_queries(sid)])
+    business = business_state(db, sid, results=business_rows)
     setup = unpack_config(fuels, nozzles)
     daily = {fuel: {"litres": 0, "sales": 0} for fuel in FUELS}
     stock = {}
@@ -559,7 +563,10 @@ def owner_state(db, sid, selected):
             "sales": payload["sales"], "cash_difference": payload["cash_difference"],
         })
     return {"date": selected, "daily": daily, "stock": stock, "shifts": shifts, "setup": setup,
-            "can_edit_opening_stock": not petrol[0]["submitted"]}
+            "can_edit_opening_stock": not petrol[0]["submitted"],
+            "business": {"active": business["active"], "tanks": business["tanks"],
+                         "exceptions_count": sum(not issue["acknowledgement"] for issue in business["exceptions"]),
+                         "customer_balance": business["unallocated_credit"] + sum(c["balance"] for c in business["customers"])}}
 
 
 def daily_owner_report(db, sid, selected, *, in_write=False):
@@ -741,8 +748,13 @@ def respond_correction(db, user, correction_id, body):
     return {"ok": True}
 
 
-def business_state(db, sid, *, in_write=False):
-    queries = [
+def active_shift_summary(row):
+    hours = max(0, (datetime.fromisoformat(now()) - datetime.fromisoformat(row["opened_at"])).total_seconds() / 3600)
+    return {**open_shift_public(row), "opener": row["opener"], "hours": round(hours, 1), "overdue": hours >= 12}
+
+
+def business_queries(sid):
+    return [
         ("SELECT s.*, u.name AS opener FROM shifts s JOIN users u ON u.id = s.opened_by WHERE s.station_id = ? ORDER BY s.id", (sid,)),
         ("SELECT * FROM customers WHERE station_id = ?", (sid,)),
         ("SELECT r.*, u.name AS actor FROM repayments r JOIN users u ON u.id = r.user_id WHERE r.station_id = ? ORDER BY r.id", (sid,)),
@@ -755,13 +767,24 @@ def business_state(db, sid, *, in_write=False):
         ("SELECT * FROM credit_allocations WHERE station_id = ? ORDER BY id", (sid,)),
         ("SELECT v.*, u.name AS actor FROM record_voids v JOIN users u ON u.id = v.user_id WHERE v.station_id = ?", (sid,)),
     ]
-    results = ([list(rows) for rows in execute_many(db, queries)] if in_write else read_snapshot(db, queries))
+
+
+def business_state(db, sid, *, in_write=False, results=None):
+    if results is None:
+        queries = business_queries(sid)
+        results = ([list(rows) for rows in execute_many(db, queries)] if in_write else read_snapshot(db, queries))
     shifts, configs, repayments, bank, tanks, reviews, acks, fuels, corrections, allocations, voids = results
     void_lookup = {(row["record_type"], row["record_id"]): dict(row) for row in voids}
     repayment_history = [dict(row) | {"void": void_lookup.get(("repayment", row["id"]))} for row in repayments]
     bank_history = [dict(row) | {"void": void_lookup.get(("bank", row["id"]))} for row in bank]
     repayments = [row for row in repayment_history if not row["void"]]
     bank = [row for row in bank_history if not row["void"]]
+    bank_by_source = defaultdict(list)
+    allocations_by_shift = defaultdict(list)
+    for row in bank:
+        bank_by_source[row["source"], row["method"]].append(row)
+    for row in allocations:
+        allocations_by_shift[row["shift_id"]].append(row)
     customers = {row["customer_key"]: dict(row) | {"sales": 0, "repaid": 0, "transactions": []} for row in configs}
     settlements = []
     exceptions = []
@@ -779,7 +802,7 @@ def business_state(db, sid, *, in_write=False):
         exceptions.append({"key": key, "kind": kind, "message": message, "signature": str(signature), "shift_id": shift_id})
 
     def receivable(source, method, expected, label):
-        records = [dict(item) for item in bank if item["source"] == source and item["method"] == method]
+        records = bank_by_source.get((source, method), [])
         gross = sum(item["amount"] + item["fees"] for item in records)
         settlements.append({"source": source, "method": method, "label": label, "expected": expected,
                             "banked": sum(item["amount"] for item in records), "fees": sum(item["fees"] for item in records),
@@ -787,10 +810,9 @@ def business_state(db, sid, *, in_write=False):
 
     for row in shifts:
         if not row["submitted_at"]:
-            hours = max(0, (datetime.fromisoformat(now()) - datetime.fromisoformat(row["opened_at"])).total_seconds() / 3600)
-            active = {**open_shift_public(row), "opener": row["opener"], "hours": round(hours, 1), "overdue": hours >= 12}
-            if hours >= 12:
-                issue(f"overdue:{row['id']}", "Overdue shift", f"Shift #{row['id']} has been open for {hours:.1f} hours.", row["opened_at"], row["id"])
+            active = active_shift_summary(row)
+            if active["overdue"]:
+                issue(f"overdue:{row['id']}", "Overdue shift", f"Shift #{row['id']} has been open for {active['hours']:.1f} hours.", row["opened_at"], row["id"])
             continue
         payload = json.loads(row["report_json"])
         shift_id = row["id"]
@@ -807,7 +829,7 @@ def business_state(db, sid, *, in_write=False):
                 issue(f"stock:{shift_id}:{fuel}", "Stock difference", f"Shift #{shift_id}, {fuel}: physical minus book stock {diff / 1000:,.3f} L.", diff, shift_id)
         credit_entries = [item for item in payload.get("entries", {}).get("payments", []) if item["method"] == "credit"]
         if not credit_entries:
-            assigned = [item for item in allocations if item["shift_id"] == shift_id]
+            assigned = allocations_by_shift.get(shift_id, [])
             remaining = payload["collections"].get("credit", 0) - sum(item["amount"] for item in assigned)
             unallocated += remaining
             if remaining:
@@ -864,6 +886,23 @@ def business_state(db, sid, *, in_write=False):
             "repayments": repayment_history, "tanks": {row["fuel"]: dict(row) for row in tanks},
             "stock": stock, "exceptions": exceptions, "corrections": [dict(row) for row in corrections],
             "today": now()[:10]}
+
+
+def operations_state(db, sid):
+    shifts, tanks, corrections, fuels, petrol, diesel = read_snapshot(db, [
+        ("""SELECT s.*, u.name AS opener FROM shifts s JOIN users u ON u.id = s.opened_by
+            WHERE s.station_id = ? AND s.submitted_at IS NULL""", (sid,)),
+        ("SELECT * FROM tanks WHERE station_id = ?", (sid,)),
+        ("SELECT * FROM corrections WHERE station_id = ? ORDER BY id DESC", (sid,)),
+        ("SELECT fuel, opening_stock FROM fuels WHERE station_id = ?", (sid,)),
+        *(stock_query(sid, fuel) for fuel in FUELS),
+    ])
+    opening = {row["fuel"]: row["opening_stock"] for row in fuels}
+    stock = {fuel: opening.get(fuel, 0) + rows[0]["delivery"] - rows[0]["sold"]
+             for fuel, rows in zip(FUELS, (petrol, diesel))}
+    return {"active": active_shift_summary(shifts[0]) if shifts else None,
+            "tanks": {row["fuel"]: dict(row) for row in tanks}, "stock": stock,
+            "corrections": list(map(dict, corrections))}
 
 
 def owner_control_route(db, user, method, route, body):
@@ -1022,13 +1061,14 @@ def owner_control_route(db, user, method, route, body):
 
 
 class Request:
-    def __init__(self, environ, database, hosted, demo, public_url="https://petroleum-management.onrender.com", automation_env=None):
+    def __init__(self, environ, database, hosted, demo, public_url="https://petroleum-management.onrender.com", automation_env=None, assets=None):
         self.environ = environ
         self.database = database
         self.hosted = hosted
         self.demo = demo
         self.public_url = public_url
         self.automation_env = automation_env or {}
+        self.assets = assets
 
     def payload(self, limit=JSON_BODY_LIMIT):
         if self.environ.get("CONTENT_TYPE", "").partition(";")[0].strip().lower() != "application/json":
@@ -1148,7 +1188,7 @@ class Request:
             return result, None
 
     def automation_helpers(self):
-        return dict(now=now, fail=fail, number=number, note=note, business_state=business_state, daily_report=daily_owner_report, env=self.automation_env, database=self.database)
+        return dict(now=now, fail=fail, number=number, note=note, business_state=business_state, daily_report=daily_owner_report, business_queries=business_queries, env=self.automation_env, database=self.database)
 
     def shift_route(self, db, user, role, method, route, data):
         if route == "/automation" or route.startswith("/automation/"):
@@ -1161,11 +1201,15 @@ class Request:
             if draft is not None:
                 return draft
         if role == "owner":
-            if method == "GET" and route in ("/payroll", "/payables"):
-                service = Automation(db, user, **self.automation_helpers())
-                last = db.execute("SELECT ran_at FROM automation_runs WHERE station_id=?", (user["station_id"],)).fetchone()
-                if not last or last["ran_at"][:10] != now()[:10]:
-                    service.run()
+            if method == "GET" and route == "/business/operations":
+                return operations_state(db, user["station_id"])
+            if method == "GET" and route in ("/business/exceptions", "/business/money"):
+                state = business_state(db, user["station_id"])
+                keys = {
+                    "/business/exceptions": ("active", "exceptions"),
+                    "/business/money": ("customers", "unallocated_credit", "unallocated_shifts", "settlements", "bank_records", "repayments", "today"),
+                }
+                return {key: state[key] for key in keys[route]}
             control = owner_control_route(db, user, method, route, data)
             if control is not None:
                 return control
@@ -1205,21 +1249,20 @@ class Request:
             if path == "/healthz":
                 return 200, b'{"ok":true}', json_type, None
             if path in STATIC_FILES:
-                body = (ROOT / "static" / path.lstrip("/")).read_bytes()
+                body = self.assets[path][0]
                 content_type = STATIC_FILES[path]
                 if content_type.startswith("text/"):
                     content_type += "; charset=utf-8"
                 return 200, body, content_type, None
             if path in ("/", "/manager", "/owner"):
-                body = (ROOT / "static" / "index.html").read_bytes()
+                body = self.assets["index"][0]
                 titles = {
                     "/": ("Tuljai Realtors & Petroleum", "Petrol and Diesel station management for Tuljai Realtors & Petroleum."),
                     "/owner": ("Tuljai Petroleum | Owner App", "View daily fuel sales, payments, stock and shift reports."),
                     "/manager": ("Tuljai Petroleum | Station Manager App", "Manage shift readings, fuel deliveries, collections and cash reconciliation."),
                 }
                 title, description = titles[path]
-                preview = self.public_url + "/tuljai-logo.jpg?v=" + asset_version(
-                    (ROOT / "static" / "tuljai-logo.jpg").read_bytes())
+                preview = self.public_url + "/tuljai-logo.jpg?v=" + self.assets["/tuljai-logo.jpg"][1]
                 metadata = {
                     "__PAGE_TITLE__": title, "__PAGE_DESCRIPTION__": description,
                     "__PAGE_URL__": self.public_url + path, "__PREVIEW_IMAGE__": preview,
@@ -1231,7 +1274,7 @@ class Request:
                 if not self.demo:
                     body = body.replace(b'<meta name="demo-mode" content="true">', b'')
                 for asset in STATIC_FILES:
-                    version = asset_version((ROOT / "static" / asset.lstrip("/")).read_bytes())
+                    version = self.assets[asset][1]
                     body = body.replace(f'"{asset}"'.encode(), f'"{asset}?v={version}"'.encode())
                 return 200, body, "text/html; charset=utf-8", None
             fail("Page not found.", 404)
@@ -1259,13 +1302,33 @@ def create_app(database=None, env=None):
             or parsed.password or parsed.query or parsed.fragment or parsed.path):
         raise RuntimeError("PUBLIC_APP_URL must be the public app origin, such as https://your-app.onrender.com.")
 
+    assets = {}
+    for key, filename in [(key, key.lstrip("/")) for key in STATIC_FILES] + [("index", "index.html")]:
+        data = (ROOT / "static" / filename).read_bytes()
+        compressed = gzip.compress(data, compresslevel=5, mtime=0) if len(data) >= 1024 and (key == "index" or STATIC_FILES[key].startswith("text/")) else None
+        assets[key] = (data, asset_version(data), compressed)
+
     def application(environ, start_response):
-        status, body, content_type, cookie = Request(environ, database, hosted, demo, public_url, {key: env[key] for key in ("OPENAI_API_KEY", "AUTOMATION_OCR_MODEL") if env.get(key)}).dispatch()
+        status, body, content_type, cookie = Request(environ, database, hosted, demo, public_url, {key: env[key] for key in ("OPENAI_API_KEY", "AUTOMATION_OCR_MODEL") if env.get(key)}, assets).dispatch()
         path = environ["PATH_INFO"]
         cache_control = "no-store"
         if (status == 200 and path in STATIC_FILES and path != "/sw.js"
-                and environ.get("QUERY_STRING", "") == "v=" + asset_version(body)):
+                and environ.get("QUERY_STRING", "") == "v=" + assets[path][1]):
             cache_control = "public, max-age=31536000, immutable"
+        encoding = None
+        compressible = status == 200 and (content_type.startswith("text/") or content_type.startswith("application/json"))
+        if compressible and len(body) >= 1024:
+            requested = {}
+            for entry in environ.get("HTTP_ACCEPT_ENCODING", "").lower().split(","):
+                name, _, params = entry.strip().partition(";")
+                try:
+                    requested[name] = float(params.strip().removeprefix("q=")) if params else 1
+                except ValueError:
+                    requested[name] = 0
+            if requested.get("gzip", requested.get("*", 0)) > 0:
+                compressed = assets.get(path, (None, None, None))[2] or gzip.compress(body, compresslevel=3, mtime=0)
+                if len(compressed) < len(body):
+                    body, encoding = compressed, "gzip"
         headers = [
             ("Content-Type", content_type),
             ("Content-Length", str(len(body))),
@@ -1273,6 +1336,10 @@ def create_app(database=None, env=None):
             ("X-Content-Type-Options", "nosniff"),
             ("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'"),
         ]
+        if compressible:
+            headers.append(("Vary", "Accept-Encoding"))
+        if encoding:
+            headers.append(("Content-Encoding", encoding))
         if cookie:
             headers.append(("Set-Cookie", cookie))
         start_response(f"{status} {HTTPStatus(status).phrase}", headers)

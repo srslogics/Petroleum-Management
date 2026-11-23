@@ -1,5 +1,6 @@
 """Exercise the WSGI application and SQLite without binding a TCP port."""
 import io
+import gzip
 import json
 import re
 import sqlite3
@@ -93,6 +94,21 @@ class WorkflowTest(unittest.TestCase):
             self.assertEqual(self.browser.response_headers[asset]["Cache-Control"], "no-store")
         self.expect(401, "/api/owner/dashboard")
         self.assertEqual(self.browser.response_headers["/api/owner/dashboard"]["Cache-Control"], "no-store")
+
+    def test_compressed_assets_preserve_version_and_identity_requests(self):
+        page = self.expect(200, "/owner").decode()
+        asset = re.search(r"/automation.js\?v=[a-f0-9]{16}", page)[0]
+        identity = self.expect(200, asset)
+        for header in ("gzip;q=0, *;q=1", "identity"):
+            self.assertEqual(self.expect(200, asset, headers={"HTTP_ACCEPT_ENCODING": header}), identity)
+            self.assertNotIn("Content-Encoding", self.browser.response_headers[asset])
+        compressed = self.expect(200, asset, headers={"HTTP_ACCEPT_ENCODING": "gzip"})
+        headers = self.browser.response_headers[asset]
+        self.assertEqual(gzip.decompress(compressed), identity)
+        self.assertEqual(headers["Content-Encoding"], "gzip")
+        self.assertEqual(headers["Vary"], "Accept-Encoding")
+        self.assertIn("immutable", headers["Cache-Control"])
+        self.assertLess(len(compressed), len(identity) // 2)
 
     def test_pwa_role_manifests_and_offline_assets(self):
         for role in ("owner", "manager"):
@@ -458,11 +474,11 @@ class HostedTest(unittest.TestCase):
         setup_owner(database, env, "9000000001", "TestOw7")
         browser = Browser(create_app(env=env), "pump.onrender.com", "https://pump.onrender.com")
         self.assertEqual(browser.request("/api/owner/login", {"identifier": "9000000001", "password": "TestOw7"})[0], 200)
-        for path in ("/api/owner/dashboard", "/api/owner/daily-report", "/api/owner/settings"):
+        for path in ("/api/owner/dashboard", "/api/owner/daily-report", "/api/owner/settings", "/api/owner/business/operations", "/api/owner/payroll", "/api/owner/payables"):
             before = self.pipeline_count
             status, data = browser.request(path)
             self.assertEqual((status, self.pipeline_count - before), (200, 2), path)
-            if path != "/api/owner/settings":
+            if path in ("/api/owner/dashboard", "/api/owner/daily-report"):
                 self.assertEqual(data["session"]["role"], "owner")
                 self.assertNotIn("password_hash", data["session"])
         self.assertEqual(browser.request("/api/owner/managers", {
@@ -585,6 +601,11 @@ class HostedTest(unittest.TestCase):
         restarted=Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
         restarted.cookies=browser.cookies.copy()
         state=restarted.request('/api/owner/automation')[1]
+        before = self.pipeline_count
+        status, refreshed = restarted.request('/api/owner/automation')
+        self.assertEqual(status, 200)
+        self.assertLessEqual(self.pipeline_count - before, 3)
+        self.assertEqual(refreshed['last_run'], state['last_run'])
         self.assertEqual(len(state['imports']),600)
         self.assertEqual(state['drafts'][0]['status'],'applied')
 

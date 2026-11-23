@@ -1,8 +1,8 @@
 "use strict";
 
 function businessOverview(data) {
-  const count = data.exceptions.filter(item => !item.acknowledgement).length;
-  const balance = data.customers.reduce((sum, item) => sum + item.balance, 0) + data.unallocated_credit;
+  const count = data.exceptions_count;
+  const balance = data.customer_balance;
   return `<section class="owner-control-summary" aria-label="Current operations and balances">
     <button id="overview-operations" type="button" class="overview-action" aria-label="View operations">
       <span class="action-label">${navigationIcon('operations')} Current shift</span>
@@ -29,7 +29,7 @@ const businessNote = (label = 'Note', name = 'note', required = false, limit = 5
 const businessDate = (label, name, value, required = true) => `<label>${label}<input type="date" name="${name}" value="${safe(value)}" ${required ? 'required' : ''}></label>`;
 
 async function openBusiness(view = 'operations') {
-  const data = await api('/business');
+  const data = await api('/business/' + view);
   if (view === 'money') showMoney(data);
   else if (view === 'exceptions') showExceptions(data);
   else showOperations(data);

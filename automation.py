@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from database import transaction, execute_many, open_db
+from database import transaction, execute_many, open_db, read_snapshot
 from outgoings import Ledger
 from manager_drafts import draft_route
 
@@ -70,10 +70,11 @@ IMPORT_COLUMNS = {
 
 
 class Automation:
-    def __init__(self, db, user, *, now, fail, number, note, business_state, daily_report, env=None, database=None):
+    def __init__(self, db, user, *, now, fail, number, note, business_state, daily_report, business_queries=None, env=None, database=None):
         self.db,self.user,self.sid=db,user,user['station_id']
         self.now,self.fail,self.number,self.note=now,fail,number,note
         self.business,self.daily=business_state,daily_report
+        self.business_queries = business_queries
         self.env=env or {}
         self.database=database
         self.today=date.fromisoformat(now()[:10])
@@ -213,12 +214,23 @@ class Automation:
         for offset in range(0,len(statements),500):execute_many(self.db,statements[offset:offset+500])
         return dict(created=created,skipped=skipped)
 
-    def imports(self,kind=None):
-        rows=[dict(r) for r in self.db.execute("SELECT * FROM automation_imports WHERE station_id=? AND (?=1 OR kind!='bank') ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END,id DESC LIMIT 2000",(self.sid,int(self.user['role']=='owner')))]
-        return [dict(row,data=json.loads(row.pop('data_json'))) for row in rows if (kind is None or row['kind']==kind) and (self.user['role']=='owner' or row['kind']!='bank')]
+    def imports_query(self):
+        return ("""SELECT * FROM automation_imports WHERE station_id=? AND (?=1 OR kind!='bank')
+                   ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END,id DESC LIMIT 2000""",
+                (self.sid, int(self.user['role']=='owner')))
 
-    def rules(self):
-        return [dict(row,payload=json.loads(row['payload_json'])) for row in map(dict,self.db.execute('SELECT * FROM automation_rules WHERE station_id=? ORDER BY id DESC',(self.sid,)))]
+    def imports(self, rows=None):
+        if rows is None:
+            rows = self.db.execute(*self.imports_query())
+        return [dict(row, data=json.loads(row['data_json'])) for row in map(dict, rows)]
+
+    def rules_query(self):
+        return ('SELECT * FROM automation_rules WHERE station_id=? ORDER BY id DESC', (self.sid,))
+
+    def rules(self, rows=None):
+        if rows is None:
+            rows = self.db.execute(*self.rules_query())
+        return [dict(row,payload=json.loads(row['payload_json'])) for row in map(dict,rows)]
 
     def save_rule(self,body):
         if 'id' in body:
@@ -226,6 +238,7 @@ class Automation:
                 self.row('automation_rules',body['id'])
                 if type(body.get('active')) is not bool:self.fail('Choose an active status.')
                 self.db.execute('UPDATE automation_rules SET active=? WHERE id=? AND station_id=?',(int(body['active']),body['id'],self.sid))
+                self.db.execute('DELETE FROM automation_runs WHERE station_id=?',(self.sid,))
             return {'ok':True}
         kind=body.get('kind')
         if kind not in ('salary','bill'):self.fail('Choose salary or bill automation.')
@@ -240,16 +253,28 @@ class Automation:
         name=self.text(body.get('name',''),'automation name',150,True)
         with transaction(self.db,immediate=True):
             self.db.execute('INSERT INTO automation_rules(station_id,kind,name,payload_json,start_month,run_day,due_day,active,user_id,created_at) VALUES (?,?,?,?,?,?,?,1,?,?)',(self.sid,kind,name,json.dumps(payload),start,run_day,due_day,self.user['id'],self.now()))
+            self.db.execute('DELETE FROM automation_runs WHERE station_id=?',(self.sid,))
         return {'ok':True}
 
-    def run(self):
-        made=0
-        with transaction(self.db,immediate=True):
-            staff=[dict(r) for r in self.db.execute('SELECT * FROM payroll_staff WHERE station_id=? AND active=1 AND monthly_salary>0',(self.sid,))]
-            draft_keys={r['draft_key'] for r in self.db.execute('SELECT draft_key FROM automation_drafts WHERE station_id=?',(self.sid,))}
-            salaries={(r['staff_id'],r['period']) for r in self.db.execute('SELECT staff_id,period FROM payroll_salaries WHERE station_id=? AND voided_at IS NULL',(self.sid,))}
+    def run(self, *, only_if_due=False):
+        made = 0
+        day = (self.today - timedelta(days=1)).isoformat()
+        with transaction(self.db, immediate=True):
+            if only_if_due:
+                last = self.db.execute('SELECT ran_at FROM automation_runs WHERE station_id=?', (self.sid,)).fetchone()
+                if self.recent_run(last):
+                    return dict(created_drafts=0, summary_date=day)
+            staff_rows, keys, salary_rows, rule_rows = execute_many(self.db, [
+                ('SELECT * FROM payroll_staff WHERE station_id=? AND active=1 AND monthly_salary>0', (self.sid,)),
+                ('SELECT draft_key FROM automation_drafts WHERE station_id=?', (self.sid,)),
+                ('SELECT staff_id,period FROM payroll_salaries WHERE station_id=? AND voided_at IS NULL', (self.sid,)),
+                self.rules_query(),
+            ])
+            staff = list(map(dict, staff_rows))
+            draft_keys = {row['draft_key'] for row in keys}
+            salaries = {(row['staff_id'], row['period']) for row in salary_rows}
             inserts=[]
-            for rule in self.rules():
+            for rule in self.rules(rule_rows):
                 if not rule['active']:continue
                 start=date.fromisoformat(rule['start_month']+'-01')
                 # Catch up at most twelve months. No historical entries are posted automatically.
@@ -273,15 +298,22 @@ class Automation:
                         made+=1
             for offset in range(0,len(inserts),500):execute_many(self.db,inserts[offset:offset+500])
             self.db.execute('INSERT INTO automation_runs VALUES (?,?,?) ON CONFLICT(station_id) DO UPDATE SET ran_at=excluded.ran_at,created_drafts=excluded.created_drafts',(self.sid,self.now(),made))
-        # Separate snapshot from the write transaction; reports use their own read snapshot.
-        day=(self.today-timedelta(days=1)).isoformat()
-        summary=self.summary(day)
-        with transaction(self.db,immediate=True):
+            summary = self.summary(day, in_transaction=True)
             self.db.execute('INSERT INTO automation_summaries VALUES (?,?,?,?) ON CONFLICT(station_id,report_date) DO UPDATE SET payload_json=excluded.payload_json,generated_at=excluded.generated_at',(self.sid,day,json.dumps(summary),self.now()))
         return dict(created_drafts=made,summary_date=day)
 
-    def drafts(self):
-        return [dict(row,payload=json.loads(row['payload_json'])) for row in map(dict,self.db.execute('SELECT * FROM automation_drafts WHERE station_id=? ORDER BY id DESC LIMIT 1000',(self.sid,)))]
+    def recent_run(self, row):
+        if not row:
+            return False
+        current = datetime.fromisoformat(self.now())
+        previous = datetime.fromisoformat(row['ran_at'])
+        return current.date() == previous.date() and timedelta(0) <= current - previous < timedelta(minutes=5)
+
+    def drafts_query(self):
+        return ('SELECT * FROM automation_drafts WHERE station_id=? ORDER BY id DESC LIMIT 1000', (self.sid,))
+
+    def drafts(self, rows):
+        return [dict(row,payload=json.loads(row['payload_json'])) for row in map(dict, rows)]
 
     def decide_draft(self,body):
         with transaction(self.db,immediate=True):
@@ -298,19 +330,25 @@ class Automation:
             self.db.execute('UPDATE automation_drafts SET status=?,decided_by=?,decided_at=? WHERE id=? AND station_id=?',('applied' if action=='approve' else 'dismissed',self.user['id'],self.now(),row['id'],self.sid))
         return {'ok':True}
 
-    def summary(self,day):
+    def summary(self,day,*,in_transaction=False):
         day=self.day(day)
-        with transaction(self.db):
+        with nullcontext() if in_transaction else transaction(self.db):
             report=self.daily(self.db,self.sid,day,in_write=True)
         return dict(date=day,sales=report['sales'],payments=report['payments'],till=report['till'],fuels=report['fuels'],shifts=len(report['shifts']),generated_at=self.now())
 
-    def forecasts(self,state):
-        start=(self.today-timedelta(days=13)).isoformat()
-        rows=list(self.db.execute('SELECT business_date,report_json FROM shifts WHERE station_id=? AND submitted_at IS NOT NULL AND business_date>=? AND business_date<=?',(self.sid,start,self.today.isoformat())))
+    def forecast_query(self):
+        return ("""SELECT business_date,
+                          SUM(json_extract(report_json, '$.fuels.Petrol.litres')) AS Petrol,
+                          SUM(json_extract(report_json, '$.fuels.Diesel.litres')) AS Diesel
+                   FROM shifts WHERE station_id=? AND submitted_at IS NOT NULL
+                   AND business_date BETWEEN ? AND ? GROUP BY business_date""",
+                (self.sid, (self.today - timedelta(days=13)).isoformat(), self.today.isoformat()))
+
+    def forecasts(self, state, rows):
         days={r['business_date'] for r in rows};first=min(days) if days else self.today.isoformat();span=(self.today-date.fromisoformat(first)).days+1
         results=[]
         for fuel in ('Petrol','Diesel'):
-            sold=sum(json.loads(row['report_json'])['fuels'][fuel]['litres'] for row in rows)
+            sold=sum(row[fuel] for row in rows)
             daily=sold/span if len(days)>=3 else None
             stock=state['stock'].get(fuel,0);tank=state['tanks'].get(fuel,{});low=tank.get('low_level',0)
             remaining=max(0,(stock-low)/daily) if daily else None
@@ -319,10 +357,22 @@ class Automation:
         return results
 
     def owner_state(self):
-        with transaction(self.db):
-            business=self.business(self.db,self.sid,in_write=True)
-            ledger=self.ledger().state(writing=True)
-        imports=self.imports();drafts=self.drafts();alerts=[dict(kind=e['kind'],message=e['message']) for e in business['exceptions'] if not e['acknowledgement']]
+        ledger = self.ledger()
+        business_queries = self.business_queries(self.sid)
+        ledger_queries = ledger.state_queries()
+        results = read_snapshot(self.db, [
+            *business_queries, *ledger_queries, self.imports_query(), self.drafts_query(),
+            self.rules_query(), self.forecast_query(),
+            ('SELECT id,kind,name,active,created_at,last_seen FROM automation_feeds WHERE station_id=?', (self.sid,)),
+            ('SELECT * FROM automation_runs WHERE station_id=?', (self.sid,)),
+        ])
+        split = len(business_queries)
+        business = self.business(self.db, self.sid, results=results[:split])
+        ledger = ledger.state(rows=results[split:split + len(ledger_queries)])
+        import_rows, draft_rows, rule_rows, forecast_rows, feeds, runs = results[-6:]
+        imports = self.imports(import_rows)
+        drafts = self.drafts(draft_rows)
+        alerts = [dict(kind=e['kind'],message=e['message']) for e in business['exceptions'] if not e['acknowledgement']]
         for row in ledger['salaries']+ledger['bills']:
             if row['voided_at'] or row['balance']<=0:continue
             days=(date.fromisoformat(row['due_date'])-self.today).days
@@ -332,14 +382,14 @@ class Automation:
         for imported in imports:
             linked=(outgoing_by_id if imported['matched_type']=='outgoing' else bank_by_id).get(imported['matched_id']) if imported['matched_type'] in ('outgoing','bank') else None
             if imported['status']=='matched' and linked and (linked.get('voided_at') or linked.get('void')):alerts.append(dict(kind='Voided matched record',message=imported['data']['reference']+' is linked to a voided record. Review its replacement.'))
-        forecasts=self.forecasts(business)
+        forecasts=self.forecasts(business, forecast_rows)
         for f in forecasts:
             if f['reorder']:alerts.append(dict(kind='Reorder forecast',message=f"{f['fuel']} may reach the low-stock threshold in {f['days_to_low']} days at recent sales rates."))
         reminders=[dict(name=c['name'],balance=c['balance'],due_date=c['due_date'],message=f"Payment reminder for {c['name']}: ₹{c['balance']/100:,.2f} is outstanding"+(f", due {c['due_date']}" if c['due_date'] else '')+'. Please share the payment reference once paid.') for c in business['customers'] if c['balance']>0]
-        return dict(today=self.today.isoformat(),imports=imports,drafts=drafts,rules=self.rules(),forecasts=forecasts,alerts=alerts,reminders=reminders,
+        return dict(today=self.today.isoformat(),imports=imports,drafts=drafts,rules=self.rules(rule_rows),forecasts=forecasts,alerts=alerts,reminders=reminders,
           settlements=[s for s in business['settlements'] if s['remaining']>0],outgoing=[e for e in ledger['entries'] if not e['voided_at'] and e['method']=='bank'],
-          feeds=[dict(row) for row in self.db.execute('SELECT id,kind,name,active,created_at,last_seen FROM automation_feeds WHERE station_id=?',(self.sid,))],
-          last_run=dict(row) if (row:=self.db.execute('SELECT * FROM automation_runs WHERE station_id=?',(self.sid,)).fetchone()) else None,
+          feeds=list(map(dict, feeds)),
+          last_run=dict(runs[0]) if runs else None,
           ocr_available=bool(self.env.get('OPENAI_API_KEY')),columns=IMPORT_COLUMNS)
 
     def match_bank(self,body):
@@ -490,7 +540,10 @@ class Automation:
         owner=self.user['role']=='owner'
         if method=='GET' and route=='/automation':
             if owner:
-                self.run();return self.owner_state()
+                last = self.db.execute('SELECT ran_at FROM automation_runs WHERE station_id=?', (self.sid,)).fetchone()
+                if not self.recent_run(last):
+                    self.run(only_if_due=True)
+                return self.owner_state()
             return dict(today=self.today.isoformat(),imports=self.imports(),ocr_available=bool(self.env.get('OPENAI_API_KEY')),columns=IMPORT_COLUMNS)
         if method=='GET' and route=='/automation/summary' and owner:return self.summary((query or {}).get('date',[self.today.isoformat()])[0])
         if method!='POST':self.fail('Page not found.',404)

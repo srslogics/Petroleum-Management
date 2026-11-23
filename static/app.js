@@ -173,6 +173,10 @@ function shell(content, view = "home") {
 
 function listen(id, action, event = "click") {
   document.getElementById(id).addEventListener(event, async e => {
+    const control = e.currentTarget;
+    const isNavigation = control.classList.contains("nav-button");
+    if (isNavigation && control.getAttribute("aria-busy") === "true") return;
+    if (isNavigation) control.setAttribute("aria-busy", "true");
     try {
       await action(e);
     } catch (error) {
@@ -186,6 +190,8 @@ function listen(id, action, event = "click") {
         notice.hidden = false;
         notice.textContent = error.message;
       }
+    } finally {
+      if (isNavigation) control.removeAttribute("aria-busy");
     }
   });
 }
@@ -245,7 +251,6 @@ async function showHome() {
   const state = await api(role === "manager" ? "/shift" :
     "/dashboard" + (selectedDate ? "?date=" + encodeURIComponent(selectedDate) : ""));
   session = state.session;
-  if (role === "manager" && state.active) state.active.draft = await api("/shifts/" + state.active.id + "/draft");
   if (role === "manager") showManager(state);
   else await showOwner(state);
 }
@@ -452,7 +457,7 @@ function bindDateFilter(endpoint, render) {
 }
 
 async function showOwner(data, canRender = () => true) {
-  const business = await api("/business");
+  const business = data.business;
   if (!canRender()) return;
   selectedDate = data.date;
   const totalSales = fuelNames.reduce((total, fuel) => total + data.daily[fuel].sales, 0);
