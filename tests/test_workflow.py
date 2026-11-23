@@ -85,7 +85,7 @@ class WorkflowTest(unittest.TestCase):
     def test_only_versioned_public_assets_are_cached(self):
         html = self.expect(200, "/owner").decode()
         self.assertEqual(self.browser.response_headers["/owner"]["Cache-Control"], "no-store")
-        for asset in ("/styles.css", "/workspace.css", "/money.css", "/money.js", "/outgoings.css", "/outgoings.js", "/typography.css", "/fonts/inter-latin.woff2", "/app.js", "/daily-report.js", "/tuljai-logo.jpg"):
+        for asset in ("/styles.css", "/workspace.css", "/money.css", "/money.js", "/outgoings.css", "/outgoings.js", "/manager-workflow.js", "/manager-workflow.css", "/typography.css", "/fonts/inter-latin.woff2", "/app.js", "/daily-report.js", "/tuljai-logo.jpg"):
             versioned = re.search(re.escape(asset) + r"\?v=[a-f0-9]{16}", html)[0]
             self.assertEqual(self.expect(200, versioned), self.expect(200, asset))
             self.assertIn("immutable", self.browser.response_headers[versioned]["Cache-Control"])
@@ -145,9 +145,9 @@ class WorkflowTest(unittest.TestCase):
         active = self.expect(200, "/api/manager/shift", {"openings": {"1": 100, "2": 200}})
         entries = {
             "payments": [
-                {"method": "upi", "amount": "100", "reference": "UTR-TEST", "party": "Customer"},
+                {"method": "upi", "amount": "100", "reference": "UTR-TEST"},
                 {"method": "upi", "amount": "50"},
-                {"method": "credit", "amount": "25", "party": "Fleet account"},
+                {"method": "card", "amount": "25"},
             ],
             "deliveries": [{"fuel": "Petrol", "quantity": "200", "party": "Demo supplier", "reference": "CH-01"}],
             "expenses": [{"amount": "10", "party": "Cleaner", "note": "Cleaning"}],
@@ -159,7 +159,7 @@ class WorkflowTest(unittest.TestCase):
         self.expect(200, f"/api/manager/shifts/{active['id']}/submit", closing)
         report = self.expect(200, f"/api/owner/shifts/{active['id']}")
         self.assertEqual(report["collections"]["upi"], 15000)
-        self.assertEqual(report["collections"]["credit"], 2500)
+        self.assertEqual(report["collections"]["card"], 2500)
         self.assertEqual(report["expenses"], 1000)
         self.assertEqual(report["expected"], 99000)
         self.assertEqual(report["fuels"]["Petrol"]["delivery"], 200000)
@@ -175,7 +175,7 @@ class WorkflowTest(unittest.TestCase):
         route = f"/api/manager/shifts/{shift['id']}/submit"
         text = {"party": "अ" * 150, "reference": "R" * 150, "note": "न" * 150}
         entries = {
-            "payments": [dict(text, method="upi", amount="1.25") for _ in range(100)],
+            "payments": [dict(text, party="", method="upi", amount="1.25") for _ in range(100)],
             "expenses": [dict(text, amount="0.25") for _ in range(100)],
             "deliveries": [dict(text, fuel="Diesel", quantity="0.125") for _ in range(100)],
         }
@@ -258,7 +258,7 @@ class WorkflowTest(unittest.TestCase):
             "closings": {"1": "1100.125", "2": "2050"},
             "deliveries": {"Petrol": "500", "Diesel": "250"},
             "physical": {"Petrol": "8399"},
-            "collections": {"cash": "9000", "upi": "5000", "card": "1000", "credit": "78.06"},
+            "collections": {"cash": "9000", "upi": "5000", "card": "1078.06"},
             "expenses": "250", "counted": "8740",
             "expense_note": "Station cleaning",
         }
@@ -314,7 +314,7 @@ class WorkflowTest(unittest.TestCase):
         first = self.expect(200, "/api/manager/shift", {"openings": {"1": "100", "2": "200"}})
         self.expect(200, f"/api/manager/shifts/{first['id']}/submit", {
             "closings": {"1": "110", "2": "210"}, "deliveries": {"Petrol": "100", "Diesel": "50"},
-            "collections": {"cash": "1000", "upi": "400", "card": "300", "credit": "268"},
+            "collections": {"cash": "1000", "upi": "400", "card": "568"},
             "expenses": "50", "counted": "940", "physical": {"Petrol": "8088"}, "expense_note": "Cleaning",
         })
         self.expect(200, f"/api/owner/shifts/{first['id']}/review", {"note": "Cash checked"})
@@ -329,9 +329,9 @@ class WorkflowTest(unittest.TestCase):
             "closings": {"1": "125", "2": "220"}, "collections": {"cash": "522.50"}, "counted": "522.50",
         })
         response = self.expect(200, "/api/owner/daily-report?date=2026-11-22")
-        self.assertEqual(response["payments"], {"cash": 150000, "upi": 140000, "card": 70000, "credit": 26800})
+        self.assertEqual(response["payments"], {"cash": 150000, "upi": 140000, "card": 96800, "credit": 0})
         self.assertEqual((response["sales"], response["receipts"], response["accounted"], response["sales_difference"]),
-                         (393600, 360000, 386800, -6800))
+                         (393600, 386800, 386800, -6800))
         self.assertEqual(response["till"], {"expenses": 5000, "expected": 145000, "counted": 145000,
                                            "cash_difference": 0, "shortage": 1000, "overage": 1000})
         self.assertEqual(response["nozzles"][0], {
@@ -545,7 +545,7 @@ class HostedTest(unittest.TestCase):
         request("/api/owner/tanks", {"fuel":"Petrol", "capacity":"10000", "low_level":"1000"})
         request("/api/manager/login", {"identifier":"9000000002", "password":"TestMg7"})
         shift = request("/api/manager/shift", {"openings":{"1":0,"2":0}})
-        request(f"/api/manager/shifts/{shift['id']}/submit", {
+        request(f"/api/owner/shifts/{shift['id']}/submit", {
             "closings":{"1":1,"2":0}, "collections":{"upi":50}, "counted":0,
             "entries":{"payments":[{"method":"credit","amount":50,"party":"Hosted Fleet"}]},
         })
@@ -560,6 +560,31 @@ class HostedTest(unittest.TestCase):
         self.assertEqual(state["settlements"][0]["remaining"], 0)
         self.assertEqual(state["tanks"]["Petrol"]["capacity"], 10000000)
         self.assertEqual(state["corrections"][0]["reason"], "Confirm reference")
+
+    def test_hosted_manager_drafts_persist_and_submit(self):
+        database = TursoDatabase.from_env(self.env, required=True)
+        setup_owner(database, self.env, "9000000001", "TestOw7")
+        browser = Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
+        def request(path, data=None, expected=200):
+            status, body = browser.request(path, data)
+            self.assertEqual(status, expected, body)
+            return body
+        request('/api/owner/login', {'identifier':'9000000001','password':'TestOw7'})
+        request('/api/owner/settings', {'rates':{'Petrol':100,'Diesel':90}})
+        request('/api/owner/managers', {'name':'Manager','phone':'9000000002','password':'TestMg7'})
+        request('/api/manager/login', {'identifier':'9000000002','password':'TestMg7'})
+        request('/api/manager/shift', {'openings':{'1':0,'2':0}})
+        data={'values':{'closing_1':'1','closing_2':'','cash':'100','counted':''},'entries':{}}
+        request('/api/manager/shifts/1/draft', {'version':0,'data':data})
+        restarted = Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
+        restarted.cookies = browser.cookies.copy()
+        saved = restarted.request('/api/manager/shifts/1/draft')[1]
+        self.assertEqual(saved['data']['values'],data['values'])
+        self.assertEqual(saved['version'],1)
+        request('/api/manager/shifts/1/draft', {'version':0,'data':data},409)
+        request('/api/manager/shifts/1/submit', {'closings':{'1':1,'2':0},'collections':{'cash':100},'counted':100,'draft_version':1})
+        request('/api/manager/shifts/1/draft', expected=409)
+        self.assertEqual(request('/api/owner/shifts/1')['collections']['cash'],10000)
 
     def test_hosted_outgoing_ledgers_persist(self):
         database = TursoDatabase.from_env(self.env, required=True)
