@@ -1,0 +1,142 @@
+/* Sign-in and recovery share the same frame and typography as the app. */
+.auth-page {
+  --auth-forest: #102d28;
+  --auth-action: #17473c;
+  --auth-paper: #fffdfa;
+  display: grid;
+  align-content: center;
+  gap: 12px;
+  min-height: 100svh;
+  padding: clamp(16px, 4vw, 56px);
+  background: radial-gradient(ellipse at 48% 30%, #f5f3eb 0%, #e9ede7 83%);
+  color: #182f29;
+}
+.auth-frame,
+.auth-footer {
+  width: min(100%, 1080px);
+  margin-inline: auto;
+}
+.auth-frame {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-height: 580px;
+  background: var(--auth-paper);
+  border: 1px solid #d5ddd3;
+  border-radius: 24px;
+  overflow: hidden;
+  box-shadow: 0 22px 65px #21352a18;
+}
+.auth-brand-panel {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 42px;
+  padding: clamp(28px, 4vw, 55px);
+  overflow: hidden;
+  background: linear-gradient(150deg, #102923, #0d342e 63%, #285246);
+  color: #f9f5e9;
+}
+.auth-brand-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 78% 65% at 105% 5%, #9abc782e, transparent 75%),
+    repeating-radial-gradient(ellipse 130% 100% at 104% 10%, transparent 0 24px, #d2dfb528 25px 26px, transparent 27px 38px);
+  mask-image: linear-gradient(155deg, #000 22%, transparent 81%);
+}
+.auth-brand-panel .brand { align-self: flex-start; }
+.auth-brand-panel .brand-logo {
+  width: 50px;
+  height: 50px;
+  padding: 3px;
+  border-radius: 11px;
+  background: #fff;
+}
+.auth-brand-panel .brand-name { color: #fffdf5; }
+.auth-brand-panel .brand-name small { color: #d1ded3; }
+.auth-brand-copy { position: relative; max-width: 100%; }
+.auth-brand-line { display: block; width: 38px; height: 2px; margin-bottom: 20px; background: #c6c88f; }
+.auth-brand-title {
+  margin: 0;
+  font-size: clamp(34px, 4.65vw, 62px);
+  line-height: 1.02;
+  letter-spacing: -.065em;
+  font-weight: var(--weight-semibold);
+}
+.auth-brand-detail { margin-top: 16px; color: #d1ded3; }
+.auth-content {
+  display: grid;
+  align-items: center;
+  padding: clamp(28px, 5vw, 70px);
+}
+.auth-form-panel { width: min(100%, 365px); margin: auto; }
+.auth-heading { margin-bottom: 26px; }
+.auth-heading .eyebrow { color: #376a54; }
+.auth-heading h1 { margin: 7px 0 9px; }
+.auth-heading > p:last-child { color: #53645c; }
+.auth-form, .auth-fields { display: grid; gap: 16px; min-width: 0; }
+.auth-form input, .auth-form textarea {
+  min-height: 50px;
+  border-color: #ccd7ce;
+  border-radius: 10px;
+  background: #fafbf7;
+}
+.auth-form input:hover, .auth-form textarea:hover { border-color: #7f9b89; }
+.auth-form :is(input, button, textarea):focus-visible {
+  outline: 2px solid #2a6e56;
+  outline-offset: 3px;
+}
+.auth-form .password-toggle { top: 3px; color: var(--auth-action); }
+.auth-form .form-error:empty { display: none; }
+.auth-primary {
+  min-height: 50px;
+  padding: 10px 14px;
+  width: 100%;
+  justify-content: space-between;
+  border-radius: 10px;
+  border-color: var(--auth-action);
+  background: var(--auth-action);
+}
+.auth-primary:hover { background: #0d352c; border-color: #0d352c; }
+.auth-form[data-step="password"] .auth-verification-label,
+.auth-form[data-step="verification"] .auth-password-label { display: none; }
+.auth-form [hidden], .auth-form-panel [hidden] { display: none !important; }
+.auth-back { justify-self: start; padding-inline: 0; }
+.auth-demo { margin-top: 12px; padding-inline: 0; }
+.auth-recovery-codes { font-family: ui-monospace, monospace; line-height: 1.5; }
+.auth-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding-inline: 5px;
+}
+.auth-footer > a, .auth-footer .install-bar button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--auth-action);
+  font-size: var(--text-small);
+}
+.auth-footer .install-bar {
+  position: static;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.auth-footer .install-bar > span { display: none; }
+.auth-footer .install-bar button { border-color: transparent; background: transparent; }
+@media (max-width: 680px) {
+  .auth-page { align-content: start; }
+  .auth-frame { grid-template-columns: minmax(0, 1fr); min-height: 0; border-radius: 19px; }
+  .auth-brand-panel { padding: 18px 22px; }
+  .auth-brand-copy { display: none; }
+  .auth-content { padding: 30px clamp(18px, 6vw, 38px); }
+}
