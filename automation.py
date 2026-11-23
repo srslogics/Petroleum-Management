@@ -12,11 +12,20 @@ import sqlite3
 from contextlib import nullcontext, closing
 from datetime import date, datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from database import transaction, execute_many, open_db, read_snapshot
 from outgoings import Ledger
 from manager_drafts import draft_route
+
+class RejectRedirects(HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, url):
+        return None
+
+
+# Do not forward model credentials or customer documents to a redirected URL.
+urlopen = build_opener(RejectRedirects()).open
+
 
 AUTOMATION_SCHEMA = """
 CREATE TABLE IF NOT EXISTS automation_imports (
@@ -578,10 +587,12 @@ class Automation:
         self.fail('Page not found.',404)
 
 
-def accept_feed(db,ident,authorization,body,**helpers):
+def accept_feed(db,ident,authorization,read_body,limit_feed,**helpers):
     row=db.execute('SELECT * FROM automation_feeds WHERE id=? AND active=1',(ident,)).fetchone()
     token=authorization.removeprefix('Bearer ') if authorization.startswith('Bearer ') else ''
     if not row or not token or not hmac.compare_digest(hashlib.sha256(token.encode()).hexdigest(),row['token_hash']):helpers['fail']('Invalid connection credentials.',401)
+    limit_feed()
+    body = read_body()
     user=dict(id=row['user_id'],station_id=row['station_id'],role='owner')
     service=Automation(db,user,**helpers)
     rows=service.parse_import(dict(kind=row['kind'],rows=body.get('rows'),date_format='iso'))

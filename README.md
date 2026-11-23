@@ -39,7 +39,7 @@ From the repository, run:
 python3 app.py setup-owner
 ```
 
-Enter the Turso URL and token when prompted, then enter the owner's mobile number and a password of 7–200 characters. The command saves the account in Turso with a password hash. An existing owner can continue signing in with their original credentials.
+Enter the Turso URL and token when prompted, then enter the owner's mobile number and a password of 15–200 characters. The command saves the account in Turso with a password hash. An existing owner can continue signing in with their original credentials.
 
 ### Reset the existing owner sign-in
 
@@ -228,3 +228,11 @@ For photo/PDF extraction, configure `OPENAI_API_KEY` securely on the hosting ser
 The pump controller, UPI/card provider and bank are currently unknown, so no provider-specific adapter or payout connection is claimed. Owners can create a feed endpoint for meters, payments or bank evidence. A random bearer token is shown once and stored only as a hash. The endpoint accepts `POST /api/feeds/<id>` with `Authorization: Bearer <token>` and JSON `{"rows":[...]}` using the canonical field names above and ISO dates. A compatible on-site gateway/provider adapter must send the data. Feed scope is fixed to its station/type; incoming data is staged, not posted, and repeated references are idempotent. Disable a feed to revoke its token; create a new one to rotate credentials. HTTPS is required on hosted deployments. Tokens must never be committed, placed in CSVs, or shared as URLs.
 
 Photo reading needs the API key; live hardware/payment sync needs device/provider details and credentials. Email/WhatsApp delivery, statutory payroll calculations and actual bank payouts are not configured by this change. The product UI distinguishes these setup dependencies from working CSV, text extraction and draft automation.
+
+## Account security
+
+New and reset passwords must be 15–200 characters. Existing passwords continue to work. Hosted cookies are Secure, HttpOnly and SameSite=Strict. Sign-ins expire after 12 hours, replace the previous session in the same browser for that account, and retain at most ten sessions per account. Owners can view the last 100 account changes in **Team → Account activity**. The journal records who changed which account and when, without storing passwords or session tokens.
+
+The current single Gunicorn worker limits repeated sign-in attempts by account and client network. Limits are held in memory and reset when the worker restarts. A multi-worker deployment should use a shared limiter. Render client addresses use the last address appended by its proxy. A non-Render deployment uses the direct peer address. Keep the app behind its configured HTTPS ingress and set `PUBLIC_APP_URL` to the public origin. Browser API requests presenting an origin must come from the same origin. Only public assets are eligible for offline caching. Manager drafts saved online stay on the server. Unsaved browser copies remain in the current tab until saved or the manager signs out.
+
+Feed credentials must be kept private and can be revoked in Connections. The app checks the bearer credential before reading import content, limits feed requests and keeps rejected uploads out of the ledger. Document extraction sends uploads only to the configured OpenAI API endpoint. Review hosting access, database backups and provider keys as separate operational controls. Multi-factor authentication is not enabled by this release.

@@ -113,7 +113,7 @@ function managerControls(manager) {
   return `<details class="business-record"><summary>${safe(manager.name)} · ${safe(manager.login_id)} · ${manager.disabled ? 'Inactive' : 'Active'}</summary>
     <form id="edit-manager-${manager.id}" class="business-form"><label>Name<input name="name" value="${safe(manager.name)}" required maxlength="80"></label>
       <label>Mobile number<input name="phone" type="tel" value="${safe(manager.login_id)}" required maxlength="24"></label>${errorbox}<button class="secondary">Save manager details</button></form>
-    <form id="reset-manager-${manager.id}" class="business-form"><label>New password<input name="password" type="password" required minlength="7" maxlength="200" autocomplete="new-password"></label>${errorbox}<button class="secondary">Reset password and sign out</button></form>
+    <form id="reset-manager-${manager.id}" class="business-form"><label>New password<input name="password" type="password" required minlength="15" maxlength="200" autocomplete="new-password"></label>${errorbox}<button class="secondary">Reset password and sign out</button></form>
     <form id="status-manager-${manager.id}" class="business-form"><p>${manager.disabled ? 'Enable sign-in for this manager.' : 'Deactivate sign-in and end all active sessions. Historical shifts are retained.'}</p>${errorbox}<button class="secondary">${manager.disabled ? 'Activate manager' : 'Deactivate manager'}</button></form>
     <form id="revoke-manager-${manager.id}" class="business-form">${errorbox}<button class="secondary">Sign out all manager sessions</button></form></details>`;
 }

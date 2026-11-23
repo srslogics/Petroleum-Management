@@ -152,7 +152,13 @@ function shell(content, view = "home") {
   if (shouldFocus) root.querySelector("main h1")?.focus({ preventScroll: true });
   window.scrollTo(0, 0);
   listen("logout", async () => {
+    if (role === "manager" && saveManagerDraftBeforeLogout && !await saveManagerDraftBeforeLogout()
+        && !window.confirm("Some shift entries could not be saved. Sign out and discard the unsaved entries in this tab?")) return;
     await api("/logout", {});
+    if (role === "manager") {
+      stopManagerDraft?.();
+      clearManagerDrafts(session);
+    }
     session = null;
     selectedDate = undefined;
     lastSubmission = undefined;
@@ -603,7 +609,8 @@ function showTeam(managers, added = false) {
   shell(`${heading("", "Team", "Create and view station manager accounts.")}
     ${added ? '<p class="success" role="status">Manager account created. Share the sign-in details privately.</p>' : ""}
     <section class="card">
-      <h2>Station managers</h2>
+      <header class="section-head"><h2>Station managers</h2>
+        <button id="account-audit" class="secondary" type="button">Account activity</button></header>
       ${managers.length ? managers.map(manager => managerControls(manager)).join("")
         : '<p>No manager accounts yet.</p>'}
     </section>
@@ -614,12 +621,24 @@ function showTeam(managers, added = false) {
           <label>Full name<input name="name" required maxlength="80" autocomplete="off"></label>
           <label>Mobile number<input name="phone" required type="tel" maxlength="24" placeholder="+91" autocomplete="off"></label>
         </div>
-        <label>Password<input name="password" type="password" required minlength="7" maxlength="200"
+        <label>Password<input name="password" type="password" required minlength="15" maxlength="200"
           autocomplete="new-password" aria-describedby="manager-password-help"></label>
-        <small id="manager-password-help">Use a password of 7–200 characters.</small>
+        <small id="manager-password-help">Use a password of 15–200 characters.</small>
         ${errorbox}<button class="primary">Create manager account</button>
       </form>
-    </section>`, "team");
+    </section>
+    <dialog id="money-dialog" aria-labelledby="money-dialog-title"></dialog>`, "team");
+  listen("account-audit", async () => {
+    const events = await api("/account-audit");
+    const labels = {create: "Account created", disable: "Account disabled", enable: "Account enabled",
+      edit: "Account updated", reset_password: "Password reset", revoke_sessions: "Sessions revoked",
+      owner_reset: "Owner credentials reset"};
+    moneyDialog("Account activity", events.length
+      ? '<div class="recorded-entries">' + events.map(event =>
+        `<div><strong>${safe(labels[event.action] || event.action)}</strong><p>${safe(event.target)}</p>
+        <small>${safe(timestamp(event.created_at))} · ${safe(event.actor)}</small></div>`).join("") + '</div>'
+      : "<p>No account changes recorded yet.</p>");
+  });
   bindManagerControls(managers);
   bindForm("add-manager", async form => {
     await api("/managers", fields(form));

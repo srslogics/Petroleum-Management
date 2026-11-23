@@ -24,6 +24,7 @@ from wsgiref.simple_server import WSGIServer, make_server
 from zoneinfo import ZoneInfo
 
 from automation import AUTOMATION_SCHEMA, Automation, accept_feed
+from security import Throttle, client_address
 from manager_drafts import DRAFT_SCHEMA, draft_route, draft_query, unpack_draft
 from outgoings import OUTGOING_SCHEMA, outgoing_route
 from database import TursoDatabase, execute_many, open_db, read_snapshot, transaction
@@ -32,6 +33,8 @@ ROOT = Path(__file__).resolve().parent
 TZ = ZoneInfo("Asia/Kolkata")
 FUELS = ("Petrol", "Diesel")
 METHODS = ("cash", "upi", "card", "credit")
+MIN_PASSWORD_LENGTH = 15
+MAX_SESSIONS_PER_USER = 10
 JSON_BODY_LIMIT = 64 * 1024
 # 300 detailed entries can contain 135,000 characters, including escaped Unicode.
 SHIFT_BODY_LIMIT = 2 * 1024 * 1024
@@ -39,7 +42,18 @@ DEMO_USERS = (
     ("manager", "manager@demo.local", "Asha Patil", "ManagerDemo123!"),
     ("owner", "owner@demo.local", "Rohan Deshmukh", "OwnerDemo123!"),
 )
-SCHEMA = """
+ACCOUNT_AUDIT_TABLE = """
+CREATE TABLE IF NOT EXISTS account_audit (
+    id INTEGER PRIMARY KEY,
+    station_id INTEGER NOT NULL REFERENCES stations(id),
+    actor_id INTEGER NOT NULL REFERENCES users(id),
+    target_id INTEGER NOT NULL REFERENCES users(id),
+    action TEXT NOT NULL,
+    created_at TEXT NOT NULL
+)
+"""
+
+SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS stations (
     id INTEGER PRIMARY KEY, name TEXT NOT NULL, code TEXT NOT NULL UNIQUE
 );
@@ -52,6 +66,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id),
     expiry INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS sessions_by_expiry ON sessions(expiry);
+CREATE INDEX IF NOT EXISTS sessions_by_user ON sessions(user_id, expiry);
+{ACCOUNT_AUDIT_TABLE};
+CREATE INDEX IF NOT EXISTS account_audit_by_station ON account_audit(station_id, id);
 CREATE TABLE IF NOT EXISTS fuels (
     station_id INTEGER NOT NULL REFERENCES stations(id),
     fuel TEXT NOT NULL CHECK(fuel IN ('Petrol','Diesel')),
@@ -179,8 +197,36 @@ def indian_mobile(value):
     return "+91" + match[1] if match else None
 
 
+def valid_unicode(value):
+    try:
+        value.encode("utf-8")
+        return True
+    except UnicodeError:
+        return False
+
+
+def reject_duplicate_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result or not valid_unicode(key):
+            raise ValueError("Invalid JSON object key.")
+        result[key] = value
+    return result
+
+
+def reject_json_constant(value):
+    raise ValueError("JSON numbers must be finite.")
+
+
+def audit_account(db, sid, actor, target, action):
+    db.execute("INSERT INTO account_audit(station_id,actor_id,target_id,action,created_at) VALUES (?,?,?,?,?)",
+               (sid, actor, target, action, now()))
+
+
 def valid_new_password(password):
-    return (isinstance(password, str) and 7 <= len(password) <= 200
+    return (isinstance(password, str) and MIN_PASSWORD_LENGTH <= len(password) <= 200
+            and valid_unicode(password)
+            and bool(password.strip())
             and password not in (account[3] for account in DEMO_USERS))
 
 
@@ -225,7 +271,7 @@ def owner_credentials(phone, password):
     if not phone:
         raise RuntimeError("Enter the owner's Indian mobile number.")
     if not valid_new_password(password):
-        raise RuntimeError("Use a password of 7–200 characters.")
+        raise RuntimeError("Use a password of 15–200 characters.")
     salt = secrets.token_hex(16)
     return phone, salt, password_hash(password, salt)
 
@@ -253,6 +299,8 @@ def reset_owner(database, phone, password):
         db.execute("UPDATE users SET login_id = ?, salt = ?, password_hash = ? WHERE id = ?",
                    (phone, salt, digest, owner_id))
         db.execute("DELETE FROM sessions WHERE user_id = ?", (owner_id,))
+        db.execute(ACCOUNT_AUDIT_TABLE)
+        audit_account(db, 1, owner_id, owner_id, "owner_reset")
 
 
 def number(value, places, label, optional=False):
@@ -280,7 +328,7 @@ def mapping(value, label, allowed=None):
 
 
 def note(value, label, limit=250):
-    if not isinstance(value, str) or len(value.strip()) > limit:
+    if not isinstance(value, str) or not valid_unicode(value) or len(value.strip()) > limit:
         fail(f"Enter {label} of up to {limit} characters.")
     return value.strip()
 
@@ -696,7 +744,8 @@ def list_managers(db, station_id):
     )]
 
 
-def create_manager(db, station_id, data):
+def create_manager(db, user, data):
+    station_id = user["station_id"]
     name = note(data.get("name", ""), "the manager's name", 80)
     if not name:
         fail("Enter the manager's name.")
@@ -705,13 +754,15 @@ def create_manager(db, station_id, data):
         fail("Enter a valid Indian mobile number.")
     password = data.get("password")
     if not valid_new_password(password):
-        fail("Use a password of 7–200 characters.")
+        fail("Use a password of 15–200 characters.")
     salt = secrets.token_hex(16)
     digest = password_hash(password, salt)
     with transaction(db, immediate=True):
         if db.execute("SELECT 1 FROM users WHERE login_id = ?", (phone,)).fetchone():
             fail("That mobile number is already registered.", 409)
         insert_user(db, station_id, "manager", phone, name, salt, digest)
+        target = db.execute("SELECT id FROM users WHERE login_id = ?", (phone,)).fetchone()
+        audit_account(db, station_id, user["id"], target["id"], "create")
     return {"name": name, "login_id": phone}
 
 
@@ -940,7 +991,7 @@ def owner_control_route(db, user, method, route, body):
             elif action == "reset_password":
                 password = body.get("password")
                 if not valid_new_password(password):
-                    fail("Use a password of 7–200 characters.")
+                    fail("Use a password of 15–200 characters.")
                 salt = secrets.token_hex(16)
                 db.execute("UPDATE users SET salt = ?, password_hash = ? WHERE id = ?", (salt, password_hash(password, salt), manager_id))
             elif action == "edit":
@@ -954,6 +1005,7 @@ def owner_control_route(db, user, method, route, body):
             elif action != "revoke_sessions":
                 fail("Choose a valid manager action.")
             db.execute("DELETE FROM sessions WHERE user_id = ?", (manager_id,))
+            audit_account(db, sid, user["id"], manager_id, action)
         return {"ok": True}
     if method == "POST" and route == "/tanks":
         fuel = body.get("fuel")
@@ -1061,7 +1113,7 @@ def owner_control_route(db, user, method, route, body):
 
 
 class Request:
-    def __init__(self, environ, database, hosted, demo, public_url="https://petroleum-management.onrender.com", automation_env=None, assets=None):
+    def __init__(self, environ, database, hosted, demo, public_url="https://petroleum-management.onrender.com", automation_env=None, assets=None, throttle=None, allowed_hosts=(), render_proxy=False):
         self.environ = environ
         self.database = database
         self.hosted = hosted
@@ -1069,21 +1121,38 @@ class Request:
         self.public_url = public_url
         self.automation_env = automation_env or {}
         self.assets = assets
+        self.throttle = throttle
+        self.allowed_hosts = allowed_hosts
+        self.render_proxy = render_proxy
 
     def payload(self, limit=JSON_BODY_LIMIT):
         if self.environ.get("CONTENT_TYPE", "").partition(";")[0].strip().lower() != "application/json":
             fail("Send a JSON request.", 415)
-        origin = self.environ.get("HTTP_ORIGIN")
-        scheme = "https" if self.hosted else self.environ["wsgi.url_scheme"]
-        if origin and origin != f'{scheme}://{self.environ.get("HTTP_HOST")}':
-            fail("Invalid request origin.", 403)
         try:
             size = int(self.environ.get("CONTENT_LENGTH") or "0")
             if not 0 < size <= limit:
                 fail("Invalid request size.", 413)
-            return mapping(json.loads(self.environ["wsgi.input"].read(size), parse_float=Decimal), "request data")
+            raw = self.environ["wsgi.input"].read(size)
+            if len(raw) != size:
+                fail("Incomplete request body.")
+            return mapping(json.loads(raw, parse_float=Decimal, parse_constant=reject_json_constant,
+                                      object_pairs_hook=reject_duplicate_keys), "request data")
         except (ValueError, UnicodeError, InvalidOperation, RecursionError):
             fail("Invalid JSON request.")
+
+    def check_browser_origin(self):
+        if self.environ.get("HTTP_SEC_FETCH_SITE") in ("cross-site", "same-site"):
+            fail("Invalid request origin.", 403)
+        origin = self.environ.get("HTTP_ORIGIN")
+        scheme = "https" if self.hosted else self.environ["wsgi.url_scheme"]
+        if origin and origin != f'{scheme}://{self.environ.get("HTTP_HOST")}':
+            fail("Invalid request origin.", 403)
+    def limit(self, group, key, maximum, seconds):
+        if not self.throttle.take((group, key), maximum, seconds):
+            fail("Too many requests. Try again later.", 429)
+
+    def address(self):
+        return client_address(self.environ, render_proxy=self.render_proxy)
 
     def token(self, role):
         jar = SimpleCookie()
@@ -1092,7 +1161,7 @@ class Request:
         except CookieError:
             return ""
         cookie = jar.get(f"pm_{role}")
-        return hashlib.sha256(cookie.value.encode()).hexdigest() if cookie else ""
+        return hashlib.sha256(cookie.value.encode()).hexdigest() if cookie and re.fullmatch(r"[A-Za-z0-9_-]{43}", cookie.value) else ""
 
     def session_cookie(self, role, token, age):
         secure = "; Secure" if self.hosted else ""
@@ -1115,6 +1184,7 @@ class Request:
         if not match:
             fail("Page not found.", 404)
         role, route = match.groups()
+        self.check_browser_origin()
         login = method == "POST" and route == "/login"
         if not login and not self.token(role):
             fail("Sign in to continue.", 401)
@@ -1129,12 +1199,17 @@ class Request:
                 identifier = note(data.get("identifier", data.get("email", "")), "a mobile number or email", 254).lower()
                 login_id = indian_mobile(identifier) or identifier
                 password = data.get("password", "")
-                if not isinstance(password, str) or len(password) > 200:
+                if not isinstance(password, str) or len(password) > 200 or not valid_unicode(password):
                     fail("Enter a password of up to 200 characters.")
-                user = db.execute("SELECT * FROM users WHERE login_id = ?", (login_id,)).fetchone()
+                self.limit("login-source", self.address(), 30, 60)
+                account_key = hashlib.sha256(login_id.encode()).hexdigest()
+                self.limit("login-account", account_key, 10, 300)
+                user = db.execute("""SELECT u.*, COALESCE(mc.disabled, 0) AS disabled
+                                     FROM users u LEFT JOIN manager_controls mc ON mc.user_id = u.id
+                                     WHERE login_id = ?""", (login_id,)).fetchone()
                 digest = password_hash(password, user["salt"] if user else "0" * 32)
-                disabled = user and db.execute("SELECT 1 FROM manager_controls WHERE user_id = ? AND disabled = 1", (user["id"],)).fetchone()
-                if not user or disabled or not secrets.compare_digest(digest, user["password_hash"]):
+                matches = secrets.compare_digest(digest, user["password_hash"] if user else "0" * 64)
+                if not user or user["disabled"] or not matches:
                     fail("Sign-in details are incorrect.", 401)
                 if user["role"] != role:
                     fail("This account cannot sign in to this app.", 403)
@@ -1143,13 +1218,22 @@ class Request:
                 with transaction(db, immediate=True):
                     db.execute("DELETE FROM sessions WHERE expiry <= ?", (int(time.time()),))
                     issued = db.execute("""INSERT INTO sessions(token_hash, user_id, expiry)
-                        SELECT ?, id, ? FROM users WHERE id = ? AND salt = ?
+                        SELECT ?, id, ? FROM users WHERE id = ? AND salt = ? AND login_id = ?
                         AND NOT EXISTS (SELECT 1 FROM manager_controls WHERE user_id = users.id AND disabled = 1)
                         RETURNING token_hash""",
                         (hashlib.sha256(token.encode()).hexdigest(), int(time.time()) + expiry,
-                         user["id"], user["salt"])).fetchone()
+                         user["id"], user["salt"], login_id)).fetchone()
                     if not issued:
                         fail("Sign-in details changed. Please sign in again.", 401)
+                    previous = self.token(role)
+                    if previous:
+                        db.execute("DELETE FROM sessions WHERE token_hash = ? AND user_id = ?", (previous, user["id"]))
+                    db.execute("""DELETE FROM sessions WHERE user_id = ? AND token_hash IN
+                                  (SELECT token_hash FROM sessions WHERE user_id = ?
+                                   ORDER BY expiry DESC, CASE WHEN token_hash = ? THEN 0 ELSE 1 END, token_hash
+                                   LIMIT -1 OFFSET ?)""",
+                               (user["id"], user["id"], issued["token_hash"], MAX_SESSIONS_PER_USER))
+                self.throttle.clear(("login-account", account_key))
                 return {"ok": True}, self.session_cookie(role, token, expiry)
             user = self.authenticated(db, role)
             sid = user["station_id"]
@@ -1173,7 +1257,7 @@ class Request:
                 view = owner_state if route == "/dashboard" else daily_owner_report
                 result = view(db, sid, selected) | {"session": user}
             elif role == "owner" and route == "/managers":
-                result = list_managers(db, sid) if method == "GET" else create_manager(db, sid, data)
+                result = list_managers(db, sid) if method == "GET" else create_manager(db, user, data)
             elif role == "owner" and route == "/settings":
                 if method == "GET":
                     fuels, nozzles, submitted = read_snapshot(db, [
@@ -1201,6 +1285,14 @@ class Request:
             if draft is not None:
                 return draft
         if role == "owner":
+            if method == "GET" and route == "/account-audit":
+                rows, = read_snapshot(db, [("""
+                    SELECT a.action, a.created_at, actor.name AS actor, target.name AS target
+                    FROM account_audit a JOIN users actor ON actor.id = a.actor_id
+                    JOIN users target ON target.id = a.target_id
+                    WHERE a.station_id = ? ORDER BY a.id DESC LIMIT 100
+                """, (user["station_id"],))])
+                return list(map(dict, rows))
             if method == "GET" and route == "/business/operations":
                 return operations_state(db, user["station_id"])
             if method == "GET" and route in ("/business/exceptions", "/business/money"):
@@ -1235,11 +1327,18 @@ class Request:
         path = self.environ["PATH_INFO"]
         json_type = "application/json; charset=utf-8"
         try:
+            if path != "/healthz" and self.allowed_hosts and self.environ.get("HTTP_HOST", "").lower() not in self.allowed_hosts:
+                fail("Invalid request host.", 400)
             feed = re.fullmatch(r"/api/feeds/([a-f0-9]{32})", path)
             if feed and method == "POST":
-                data = self.payload(SHIFT_BODY_LIMIT)
+                self.check_browser_origin()
+                authorization = self.environ.get("HTTP_AUTHORIZATION", "")
+                if not re.fullmatch(r"Bearer [A-Za-z0-9_-]{43}", authorization):
+                    fail("Invalid connection credentials.", 401)
+                self.limit("feed-source", self.address(), 120, 60)
                 with closing(open_db(self.database)) as db:
-                    result = accept_feed(db, feed[1], self.environ.get("HTTP_AUTHORIZATION", ""), data, **self.automation_helpers())
+                    result = accept_feed(db, feed[1], authorization, lambda: self.payload(SHIFT_BODY_LIMIT),
+                                         lambda: self.limit("feed", feed[1], 60, 60), **self.automation_helpers())
                 return 200, json.dumps(result).encode(), json_type, None
             if path.startswith("/api/") and method in ("GET", "POST"):
                 result, cookie = self.api(method, path)
@@ -1302,6 +1401,12 @@ def create_app(database=None, env=None):
             or parsed.password or parsed.query or parsed.fragment or parsed.path):
         raise RuntimeError("PUBLIC_APP_URL must be the public app origin, such as https://your-app.onrender.com.")
 
+    configured_origins = (env.get("PUBLIC_APP_URL"), env.get("RENDER_EXTERNAL_URL"))
+    allowed_hosts = {urlsplit(origin).netloc.lower() for origin in configured_origins if origin} if hosted else set()
+    if hosted and parsed.scheme != "https":
+        raise RuntimeError("Hosted deployments require an HTTPS public app URL.")
+    throttle = Throttle()
+    automation_env = {key: env[key] for key in ("OPENAI_API_KEY", "AUTOMATION_OCR_MODEL") if env.get(key)}
     assets = {}
     for key, filename in [(key, key.lstrip("/")) for key in STATIC_FILES] + [("index", "index.html")]:
         data = (ROOT / "static" / filename).read_bytes()
@@ -1309,14 +1414,16 @@ def create_app(database=None, env=None):
         assets[key] = (data, asset_version(data), compressed)
 
     def application(environ, start_response):
-        status, body, content_type, cookie = Request(environ, database, hosted, demo, public_url, {key: env[key] for key in ("OPENAI_API_KEY", "AUTOMATION_OCR_MODEL") if env.get(key)}, assets).dispatch()
+        request = Request(environ, database, hosted, demo, public_url, automation_env, assets,
+                          throttle=throttle, allowed_hosts=allowed_hosts, render_proxy=env.get("RENDER") == "true")
+        status, body, content_type, cookie = request.dispatch()
         path = environ["PATH_INFO"]
         cache_control = "no-store"
         if (status == 200 and path in STATIC_FILES and path != "/sw.js"
                 and environ.get("QUERY_STRING", "") == "v=" + assets[path][1]):
             cache_control = "public, max-age=31536000, immutable"
         encoding = None
-        compressible = status == 200 and (content_type.startswith("text/") or content_type.startswith("application/json"))
+        compressible = status == 200 and environ["REQUEST_METHOD"] in ("GET", "HEAD") and (content_type.startswith("text/") or content_type.startswith("application/json"))
         if compressible and len(body) >= 1024:
             requested = {}
             for entry in environ.get("HTTP_ACCEPT_ENCODING", "").lower().split(","):
@@ -1334,8 +1441,16 @@ def create_app(database=None, env=None):
             ("Content-Length", str(len(body))),
             ("Cache-Control", cache_control),
             ("X-Content-Type-Options", "nosniff"),
-            ("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'"),
+            ("Content-Security-Policy", "default-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"),
+            ("Referrer-Policy", "same-origin"),
+            ("X-Frame-Options", "DENY"),
+            ("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()"),
+            ("Cross-Origin-Resource-Policy", "same-origin"),
         ]
+        if hosted:
+            headers.append(("Strict-Transport-Security", "max-age=31536000"))
+        if status == 429:
+            headers.append(("Retry-After", "300" if path.endswith("/login") else "60"))
         if compressible:
             headers.append(("Vary", "Accept-Encoding"))
         if encoding:
