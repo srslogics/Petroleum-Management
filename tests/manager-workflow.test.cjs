@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {spawn}=require('node:child_process');
-const {mkdtemp,rm,mkdir}=require('node:fs/promises');
+const {mkdtemp,rm,mkdir,readFile}=require('node:fs/promises');
 const {tmpdir}=require('node:os');
 const path=require('node:path');
 const {chromium}=require('playwright');
@@ -38,9 +38,81 @@ test('Manager entry drafts, simple totals, cash counter and final submission wor
   await other.getByRole('button',{name:'Expenses',exact:true}).click();await other.getByLabel('Shift note (optional)',{exact:true}).fill('Second tab note');await other.getByRole('button',{name:'Save now',exact:true}).click();await other.locator('#manager-save-status').getByText(/Draft changed elsewhere/).waitFor();await other.getByRole('button',{name:'Load saved draft',exact:true}).click();await other.getByRole('dialog').getByRole('button',{name:'Load saved draft',exact:true}).click();await other.getByRole('button',{name:'Expenses',exact:true}).click();assert.equal(await other.getByLabel('Shift note (optional)',{exact:true}).inputValue(),'First tab note');await other.close();
   const capture=process.env.SCREENSHOT_DIR;if(capture)await mkdir(capture,{recursive:true});
   for(const width of [1440,390,320]){await page.setViewportSize({width,height:1000});for(const tab of ['Meters & stock','Collections','Deliveries','Expenses']){await page.getByRole('button',{name:tab,exact:true}).click();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),tab+' at '+width);}if(capture)await page.screenshot({path:path.join(capture,'manager-'+width+'.png'),fullPage:true});}
+  // The owner has an independent session and can keep the report open while the manager works.
+  const ownerContext = await browser.newContext();
+  const owner = await ownerContext.newPage();
+  const ownerErrors = [];
+  owner.on('pageerror', error => ownerErrors.push(error.message));
+  const ownerLogin = await ownerContext.request.post(origin + '/api/owner/login', {
+    data: {email:'owner@demo.local', password:'OwnerDemo123!'},
+  });
+  assert.equal(ownerLogin.status(), 200);
+  await owner.goto(origin + '/owner');
+  await owner.getByRole('button', {name:'Daily report', exact:true}).click();
+  await owner.getByText('No shifts were submitted for this business date.').waitFor();
   await page.getByRole('button',{name:'Review entries',exact:true}).click();const review=page.locator('#money-dialog');await review.getByRole('heading',{name:'Review shift entries',exact:true}).waitFor();await review.getByText('CH-1',{exact:false}).waitFor();await review.getByRole('button',{name:'Back to entries',exact:true}).click();assert.equal(await page.getByLabel('Shift note (optional)',{exact:true}).inputValue(),'First tab note');
   await page.getByRole('button',{name:'Review entries',exact:true}).click();if(capture)await page.screenshot({path:path.join(capture,'manager-review-320.png'),fullPage:true});await page.route('**/api/manager/shifts/1/submit',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'Temporary test failure. Try again.'})}));await review.getByRole('button',{name:'Submit shift closing',exact:true}).click();await review.locator('.form-error').getByText(/Temporary test failure/).waitFor();assert.equal(await page.getByLabel('Shift note (optional)',{exact:true}).inputValue(),'First tab note');await page.unroute('**/api/manager/shifts/1/submit');await review.getByRole('button',{name:'Submit shift closing',exact:true}).click();await page.getByRole('heading',{name:'Open a shift',exact:true}).waitFor();assert.match(await page.locator('main').textContent(),/Shift #1 submitted/);
-  const ownerLogin=await context.request.post(origin+'/api/owner/login',{data:{email:'owner@demo.local',password:'OwnerDemo123!'}});assert.equal(ownerLogin.status(),200);const report=await (await context.request.get(origin+'/api/owner/shifts/1')).json();assert.equal(report.collections.credit,0);assert.equal(report.collections.cash,50000);assert.equal(report.counted,45000);assert.equal(report.expenses,5000);assert.equal(report.entries.deliveries[0].reference,'CH-1');assert.equal(report.shift_note,'First tab note');assert.equal(report.cash_difference,0);
+  const shift = await (await ownerContext.request.get(origin + '/api/owner/shifts/1')).json();
+  assert.deepEqual(shift.collections, {cash:50000, upi:100000, card:46800, credit:0});
+  assert.equal(shift.counted, 45000);
+  assert.equal(shift.expenses, 5000);
+  assert.equal(shift.entries.deliveries[0].reference, 'CH-1');
+  assert.equal(shift.shift_note, 'First tab note');
+  assert.equal(shift.cash_difference, 0);
+
+  await owner.getByRole('button', {name:'Refresh report'}).click();
+  await owner.getByRole('button', {name:'Shift #1', exact:true}).waitFor();
+  const daily = await (await ownerContext.request.get(origin + '/api/owner/daily-report?date=' + shift.business_date)).json();
+  assert.equal(daily.sales, 196800);
+  assert.equal(daily.litres, 20000);
+  assert.deepEqual(daily.payments, shift.collections);
+  assert.deepEqual(daily.till, {expenses:5000, expected:45000, counted:45000, cash_difference:0, shortage:0, overage:0});
+  assert.equal(daily.fuels.Petrol.closing_stock, daily.fuels.Petrol.opening_stock + 90000);
+  assert.equal(daily.fuels.Petrol.physical.litres, 8000000);
+  assert.deepEqual(daily.shifts[0].entries, shift.entries);
+
+  await owner.getByRole('button', {name:'Shift #1', exact:true}).click();
+  await owner.getByLabel('Review note').fill('Matched shift records');
+  await owner.getByRole('button', {name:'Mark as reviewed'}).click();
+  await owner.getByText('Matched shift records', {exact:true}).waitFor();
+  await owner.locator('#back').click();
+  await owner.getByRole('button', {name:'Shift #1', exact:true}).waitFor();
+  const downloadEvent = owner.waitForEvent('download');
+  await owner.getByRole('button', {name:'Export CSV'}).click();
+  const download = await downloadEvent;
+  assert.equal(download.suggestedFilename(), 'tuljai-petroleum-daily-' + shift.business_date + '.csv');
+  const csv = await readFile(await download.path(), 'utf8');
+  for (const line of [
+    '"Metered sales (INR)","1968"',
+    '"UPI (INR)","1000"',
+    '"CH-1"',
+    '"UTR-1"',
+    '"First tab note"',
+    '"Matched shift records","450","450"',
+  ]) assert.ok(csv.includes(line), 'Missing CSV value: ' + line);
+  // Export and print must not use the prior date's numbers while fetching a new date.
+  let releaseDate;
+  const waitForDate = new Promise(resolve => { releaseDate = resolve; });
+  await owner.route('**/api/owner/daily-report?date=2020-01-01', async route => {
+    await waitForDate;
+    await route.continue();
+  });
+  await owner.getByLabel('Business date').fill('2020-01-01');
+  try {
+    await owner.waitForFunction(() => document.querySelector('#export-day')?.disabled);
+    assert.equal(await owner.getByRole('button', {name:'Print', exact:true}).isDisabled(), true);
+  } finally {
+    releaseDate();
+  }
+  await owner.getByText('No shifts were submitted for this business date.').waitFor();
+  assert.equal(await owner.getByRole('button', {name:'Export CSV'}).isEnabled(), true);
+  await owner.getByLabel('Business date').fill(shift.business_date);
+  await owner.getByRole('button', {name:'Shift #1', exact:true}).waitFor();
+  await owner.getByRole('button', {name:'Overview', exact:true}).click();
+  await owner.getByRole('button', {name:'Open shift 1 report'}).waitFor();
+  assert.match(await owner.getByRole('region', {name:'Daily fuel sales'}).textContent(), /1,968\.00/);
+  assert.deepEqual(ownerErrors, []);
+  await ownerContext.close();
   await page.getByRole('button',{name:'Open shift',exact:true}).click();await page.getByRole('heading',{name:'Shift entries',exact:true}).waitFor();assert.equal(await page.getByLabel('P-01 closing reading (L)').inputValue(),'');assert.equal(await page.evaluate(()=>Object.keys(sessionStorage).filter(k=>k.startsWith('tuljai-draft:')&&k.endsWith(':1')).length),0);
   assert.deepEqual(errors,[]);
 });

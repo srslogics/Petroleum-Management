@@ -508,24 +508,38 @@ function reviewStatus(shift) {
 }
 
 function bindDateFilter(endpoint, render) {
-  listen("date", async event => {
-    const control = event.target;
+  const control = document.querySelector("#date");
+  const buttons = [...document.querySelectorAll("#print-day, #export-day, #refresh-day")];
+  let request = 0;
+  const update = async (refresh = false) => {
+    if (!control.value) control.value = selectedDate;
     const date = control.value;
-    if (!date || date === selectedDate) return;
-    control.setAttribute("aria-busy", "true");
+    const current = ++request;
+    const isCurrent = () => control.isConnected && current === request && control.value === date;
+    const setBusy = busy => {
+      control.setAttribute("aria-busy", String(busy));
+      for (const button of buttons) button.disabled = busy;
+    };
+    if (date === selectedDate && !refresh) {
+      setBusy(false);
+      return;
+    }
+    setBusy(true);
     try {
       const updated = await api(endpoint + "?date=" + encodeURIComponent(date));
-      if (!control.isConnected || control.value !== date) return;
-      await render(updated, () => control.isConnected && control.value === date);
-      document.querySelector("#date").focus({ preventScroll: true });
+      if (!isCurrent()) return;
+      await render(updated, isCurrent);
+      document.querySelector(refresh ? "#refresh-day" : "#date")?.focus({ preventScroll: true });
     } catch (error) {
-      if (!control.isConnected || control.value !== date) return;
+      if (!isCurrent()) return;
       control.value = selectedDate;
       throw error;
     } finally {
-      control.removeAttribute("aria-busy");
+      if (current === request) setBusy(false);
     }
-  }, "change");
+  };
+  listen("date", () => update(), "change");
+  if (document.querySelector("#refresh-day")) listen("refresh-day", () => update(true));
 }
 
 async function showOwner(data, canRender = () => true) {
