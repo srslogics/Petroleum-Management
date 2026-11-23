@@ -26,7 +26,7 @@ class Browser:
         self.set_cookies = {}
         self.response_headers = {}
 
-    def request(self, path, data=None, cookie=None, origin=None):
+    def request(self, path, data=None, cookie=None, origin=None, headers=None):
         method = "GET" if data is None else "POST"
         payload = b"" if data is None else json.dumps(data).encode()
         role = path.split("/")[2] if path.startswith("/api/") else ""
@@ -40,6 +40,7 @@ class Browser:
             "HTTP_COOKIE": cookie, "CONTENT_TYPE": "application/json",
             "CONTENT_LENGTH": str(len(payload)), "wsgi.input": io.BytesIO(payload),
         })
+        environ.update(headers or {})
         response = {}
 
         def start_response(status, headers):
@@ -85,7 +86,7 @@ class WorkflowTest(unittest.TestCase):
     def test_only_versioned_public_assets_are_cached(self):
         html = self.expect(200, "/owner").decode()
         self.assertEqual(self.browser.response_headers["/owner"]["Cache-Control"], "no-store")
-        for asset in ("/styles.css", "/workspace.css", "/money.css", "/money.js", "/outgoings.css", "/outgoings.js", "/manager-workflow.js", "/manager-workflow.css", "/typography.css", "/fonts/inter-latin.woff2", "/app.js", "/daily-report.js", "/tuljai-logo.jpg"):
+        for asset in ("/styles.css", "/workspace.css", "/money.css", "/money.js", "/outgoings.css", "/outgoings.js", "/manager-workflow.js", "/manager-workflow.css", "/automation.js", "/automation.css", "/typography.css", "/fonts/inter-latin.woff2", "/app.js", "/daily-report.js", "/tuljai-logo.jpg"):
             versioned = re.search(re.escape(asset) + r"\?v=[a-f0-9]{16}", html)[0]
             self.assertEqual(self.expect(200, versioned), self.expect(200, asset))
             self.assertIn("immutable", self.browser.response_headers[versioned]["Cache-Control"])
@@ -560,6 +561,32 @@ class HostedTest(unittest.TestCase):
         self.assertEqual(state["settlements"][0]["remaining"], 0)
         self.assertEqual(state["tanks"]["Petrol"]["capacity"], 10000000)
         self.assertEqual(state["corrections"][0]["reason"], "Confirm reference")
+
+    def test_hosted_automation_batches_and_approvals(self):
+        database = TursoDatabase.from_env(self.env, required=True)
+        setup_owner(database, self.env, "9000000001", "TestOw7")
+        browser = Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
+        def request(path, data=None):
+            status, body = browser.request('/api/owner' + path, data)
+            self.assertEqual(status, 200, body)
+            return body
+        request('/login', {'identifier':'9000000001','password':'TestOw7'})
+        request('/payroll/staff', {'name':'Staff','code':'S1','monthly_salary':10000})
+        request('/automation/rules', {'kind':'salary','name':'Monthly payroll','start_month':'2026-11','run_day':1,'due_day':28})
+        draft=request('/automation')['drafts'][0]
+        request('/automation/drafts', {'id':draft['id'],'action':'approve'})
+        self.assertEqual(request('/payroll')['salaries'][0]['amount'],1000000)
+        rows=[{'date':'2026-11-22','reference':'B-'+str(i),'amount':'1.00'} for i in range(600)]
+        self.pipeline_count=0
+        imported=request('/automation/imports', {'kind':'bank','rows':rows})
+        self.assertEqual(imported['created'],600)
+        self.assertLess(self.pipeline_count,12)
+        self.assertEqual(request('/automation/imports', {'kind':'bank','rows':rows})['skipped'],600)
+        restarted=Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
+        restarted.cookies=browser.cookies.copy()
+        state=restarted.request('/api/owner/automation')[1]
+        self.assertEqual(len(state['imports']),600)
+        self.assertEqual(state['drafts'][0]['status'],'applied')
 
     def test_hosted_manager_drafts_persist_and_submit(self):
         database = TursoDatabase.from_env(self.env, required=True)

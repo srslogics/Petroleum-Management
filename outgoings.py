@@ -1,5 +1,6 @@
 """Owner outgoing ledgers. Amounts are integer paise; corrections retain history."""
 import re
+from contextlib import nullcontext
 import sqlite3
 from datetime import date
 from database import read_snapshot, transaction
@@ -104,8 +105,8 @@ class Ledger:
         values = dict(station_id=self.sid, **values, user_id=self.user['id'], created_at=self.now())
         self.db.execute(f"INSERT INTO {table} ({','.join(values)}) VALUES ({','.join('?' for _ in values)})", tuple(values.values()))
 
-    def mutate(self, route, body):
-        with transaction(self.db, immediate=True):
+    def mutate(self, route, body, *, in_transaction=False):
+        with nullcontext() if in_transaction else transaction(self.db, immediate=True):
             state = self.state(True)
             if route == '/payroll/staff':
                 values = dict(code=self.text(body, 'code').upper(), name=self.text(body, 'name'),

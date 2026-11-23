@@ -1,5 +1,6 @@
 """Incomplete manager entries, saved independently of locked shift reports."""
 import json
+from contextlib import nullcontext
 import re
 from database import transaction
 
@@ -11,12 +12,12 @@ CREATE TABLE IF NOT EXISTS manager_shift_drafts (
 """
 
 
-def draft_route(db, user, method, route, body, *, fail, note, now):
+def draft_route(db, user, method, route, body, *, fail, note, now, in_transaction=False):
     match = re.fullmatch(r'/shifts/([0-9]{1,18})/draft', route)
     if not match:
         return None
     shift_id, sid = int(match[1]), user['station_id']
-    with transaction(db, immediate=method == 'POST'):
+    with nullcontext() if in_transaction else transaction(db, immediate=method == 'POST'):
         shift = db.execute('SELECT * FROM shifts WHERE id = ? AND station_id = ?', (shift_id, sid)).fetchone()
         if not shift:
             fail('Shift not found.', 404)

@@ -26,7 +26,7 @@ function restoreManagerDraft(form,data){
   form.syncEntries();
 }
 function showManagerEntry(active){
-  shell(`<div class="manager-heading"><div>${heading('Shift #'+active.id+' · '+businessDay(active.business_date),'Shift entries','Enter totals as you work. Review once before submitting.')}</div><div class="manager-draft"><span id="manager-save-status" role="status" aria-live="polite">Loading draft…</span><button id="manager-save-now" type="button" class="text-button">Save now</button><button id="manager-load-draft" type="button" class="text-button" hidden>Load saved draft</button></div></div>
+  shell(`<div class="manager-heading"><div>${heading('Shift #'+active.id+' · '+businessDay(active.business_date),'Shift entries','Enter totals as you work. Review once before submitting.')}</div><div class="manager-draft"><span id="manager-save-status" role="status" aria-live="polite">Loading draft…</span><button id="manager-import-figures" type="button" class="text-button">Import figures</button><button id="manager-read-document" type="button" class="text-button">Read receipt / challan</button><button id="manager-save-now" type="button" class="text-button">Save now</button><button id="manager-load-draft" type="button" class="text-button" hidden>Load saved draft</button></div></div>
     <form id="close-shift" class="manager-entry-form"><div class="manager-entry-layout"><div class="manager-entry-main">
     <nav class="manager-entry-tabs" aria-label="Entry sections">${[['meters','Meters & stock'],['collections','Collections'],['deliveries','Deliveries'],['expenses','Expenses']].map(([id,label],i)=>`<button id="manager-tab-${id}" type="button" class="${i?'':'selected'}" aria-controls="manager-panel-${id}" ${i?'':'aria-current="true"'} data-manager-tab="${id}">${label}</button>`).join('')}</nav>
     <section id="manager-panel-meters" class="card manager-panel"><header class="section-head"><div><h2>Meter readings</h2><p>Enter the current closing reading for each nozzle.</p></div></header><div class="nozzle-list">${active.nozzles.map(n=>`<div class="nozzle-row"><div><strong>${safe(n.code)}</strong> ${fuelTag(n.fuel)}<small>Opening ${volume(n.opening)} · ${money(active.rates[n.fuel])} / L</small><small id="sold-${n.id}">Sold —</small></div>${numberField(n.code+' closing reading (L)','closing_'+n.id,{step:'0.001',min:decimal(n.opening,1000),required:true})}</div>`).join('')}</div>
@@ -51,6 +51,8 @@ function showManagerEntry(active){
   restoreManagerDraft(form,restore);updatePreview(form,active);
   const draft=bindShiftDraft(form,active,saved,localDirty,localConflict);
   bindManagerCash(form);
+  listen("manager-import-figures",()=>openShiftImports(active,form,draft));
+  listen("manager-read-document",async()=>{automationData=await api("/automation");openDocumentReader({active,form,draft});});
   bindForm('close-shift',async()=>showManagerReview(form,active,draft));
 }
 function bindShiftDraft(form,active,saved,dirty,localConflict=false){
@@ -82,7 +84,7 @@ function bindShiftDraft(form,active,saved,dirty,localConflict=false){
   message(dirty?'Restored unsaved entries from this tab':saved.data?'Draft restored · '+timestamp(saved.saved_at):'Ready for entries');
   if(conflict){document.querySelector('#manager-load-draft').hidden=false;message('Draft changed elsewhere. Your local edits are kept. Load saved draft to continue.');}
   else if(dirty)timer=setTimeout(save,500);
-  return {save,version:()=>version,conflicted:()=>conflict,finish:()=>{changed=false;stopManagerDraft();try{sessionStorage.removeItem(key);}catch{}}};
+  return {save,version:()=>version,isDirty:()=>changed,conflicted:()=>conflict,finish:()=>{changed=false;stopManagerDraft();try{sessionStorage.removeItem(key);}catch{}}};
 }
 function bindManagerCash(form){
   const dialog=document.querySelector('#manager-cash-dialog');
