@@ -85,7 +85,7 @@ class WorkflowTest(unittest.TestCase):
     def test_only_versioned_public_assets_are_cached(self):
         html = self.expect(200, "/owner").decode()
         self.assertEqual(self.browser.response_headers["/owner"]["Cache-Control"], "no-store")
-        for asset in ("/styles.css", "/workspace.css", "/typography.css", "/fonts/inter-latin.woff2", "/app.js", "/daily-report.js", "/tuljai-logo.jpg"):
+        for asset in ("/styles.css", "/workspace.css", "/money.css", "/money.js", "/typography.css", "/fonts/inter-latin.woff2", "/app.js", "/daily-report.js", "/tuljai-logo.jpg"):
             versioned = re.search(re.escape(asset) + r"\?v=[a-f0-9]{16}", html)[0]
             self.assertEqual(self.expect(200, versioned), self.expect(200, asset))
             self.assertIn("immutable", self.browser.response_headers[versioned]["Cache-Control"])
