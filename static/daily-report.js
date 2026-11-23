@@ -35,6 +35,7 @@ function showDailyReport(data) {
     ${heading(businessDay(data.date), "Daily report", reportStation())}
     <div class="report-controls"><label class="date-control">Business date<input id="date" type="date" value="${safe(data.date)}"></label>
       <button id="refresh-day" class="secondary" type="button">Refresh report</button>
+      <button id="whatsapp-day" class="secondary" type="button">Share via WhatsApp</button>
       <button id="print-day" class="secondary" type="button">Print</button>
       <button id="export-day" class="primary" type="button">Export CSV</button>
     </div>
@@ -116,6 +117,17 @@ function showDailyReport(data) {
       ${shift.review_note ? `<p><strong>Owner review note</strong> · ${safe(shift.review_note)}</p>` : ""}
     </div>`).join("")}</div></section>` : ""}</div>`, "daily-report");
   bindDateFilter("/daily-report", showDailyReport);
+  listen("whatsapp-day", () => openWhatsAppComposer([
+    `${session.station} (${session.station_code}) · Daily report · ${businessDay(data.date)}`,
+    shifts.length ? [
+      `Submitted shifts: ${shifts.length} (${pending} awaiting review)`,
+      `Metered fuel sales: ${money(data.sales)} · ${volume(data.litres)}`,
+      `Payments received: ${money(data.receipts)}`,
+      `Cash: ${money(payments.cash)} · UPI: ${money(payments.upi)} · Card: ${money(payments.card)}`,
+      `Credit sales: ${money(payments.credit)}`,
+      `Cash counted: ${money(till.counted)} · Cash difference: ${money(till.cash_difference)}`,
+    ].join("\n") : "No shifts were submitted for this business date.",
+  ].join("\n\n")));
   listen("print-day", () => window.print());
   listen("export-day", () => downloadDailyReport(data));
   for (const shift of shifts) {

@@ -109,8 +109,44 @@ function showExceptions(data) {
   });
 }
 
+function whatsappNumber(phone) {
+  const digits = phone.replace(/[\s().-]/g, "").replace(/^\+/, "");
+  return /^[1-9]\d{7,14}$/.test(digits) ? digits : "";
+}
+
+function whatsappUrl(message, digits = "") {
+  const url = new URL("https://wa.me/" + digits);
+  if (message) url.searchParams.set("text", message);
+  return url.href;
+}
+
+function whatsappLink(label, message, digits = "") {
+  return `<a class="secondary whatsapp-link" href="${safe(whatsappUrl(message, digits))}" target="_blank" rel="noopener noreferrer">${safe(label)}</a>`;
+}
+
+function openWhatsAppComposer(message = "") {
+  moneyDialog("Send with WhatsApp", `<form id="whatsapp-form" class="money-form">
+    <label>WhatsApp number (optional)<input name="recipient" type="tel" maxlength="24" placeholder="+91 …" autocomplete="off" aria-describedby="whatsapp-recipient-help"></label>
+    <p id="whatsapp-recipient-help" class="money-form-hint">Include the country code, or leave this blank to choose a contact in WhatsApp.</p>
+    <div><label for="whatsapp-message">Message</label><textarea id="whatsapp-message" name="message" rows="6" maxlength="2000">${safe(message)}</textarea></div>
+    ${errorbox}<button class="primary" type="submit">Open WhatsApp</button>
+  </form>`);
+  bindForm("whatsapp-form", form => {
+    const phone = form.elements.recipient.value.trim();
+    const digits = whatsappNumber(phone);
+    const text = form.elements.message.value.trim();
+    if (phone && (!phone.startsWith("+") || !digits)) {
+      throw new Error("Enter a mobile number starting with + and its country code.");
+    }
+    if (!digits && !text) throw new Error("Enter a number or write a message.");
+    window.open(whatsappUrl(text, digits), "_blank", "noopener,noreferrer");
+  }, false);
+}
+
 function managerControls(manager) {
+  const phone = whatsappNumber(manager.login_id);
   return `<details class="business-record"><summary>${safe(manager.name)} · ${safe(manager.login_id)} · ${manager.disabled ? 'Inactive' : 'Active'}</summary>
+    ${phone ? whatsappLink("WhatsApp " + manager.name, "", phone) : ""}
     <form id="edit-manager-${manager.id}" class="business-form"><label>Name<input name="name" value="${safe(manager.name)}" required maxlength="80"></label>
       <label>Mobile number<input name="phone" type="tel" value="${safe(manager.login_id)}" required maxlength="24"></label>${errorbox}<button class="secondary">Save manager details</button></form>
     <form id="reset-manager-${manager.id}" class="business-form"><label>New password<input name="password" type="password" required minlength="15" maxlength="200" autocomplete="new-password"></label>${errorbox}<button class="secondary">Reset password and sign out</button></form>
