@@ -34,6 +34,7 @@ function showDailyReport(data) {
   </div><div class="dashboard-heading">
     ${heading(businessDay(data.date), "Daily report", reportStation())}
     <div class="report-controls"><label class="date-control">Business date<input id="date" type="date" value="${safe(data.date)}"></label>
+      <button id="refresh-day" class="secondary" type="button">Refresh report</button>
       <button id="print-day" class="secondary" type="button">Print</button>
       <button id="export-day" class="primary" type="button">Export CSV</button>
     </div>
@@ -155,11 +156,11 @@ function dailyCsv(data) {
     }), [],
     ["Shift", "Manager", "Opened (IST)", "Submitted (IST)", "Metered sales (INR)", "Cash (INR)", "UPI (INR)",
       "Card (INR)", "Credit (INR)", "Expenses (INR)", "Cash difference (INR)", "Receipts plus credit minus sales (INR)",
-      "Reviewed by", "Reviewed at (IST)", "Expense note", "Review note"],
+      "Reviewed by", "Reviewed at (IST)", "Expense note", "Review note", "Expected cash (INR)", "Counted cash (INR)"],
     ...data.shifts.map(shift => [shift.id, shift.submitter, shift.opened_at, shift.submitted_at, m(shift.sales),
       ...Object.keys(methodNames).map(method => m(shift.payments[method])),
       m(shift.expenses), m(shift.cash_difference), m(shift.collection_difference), shift.reviewer,
-      shift.reviewed_at, shift.expense_note, shift.review_note]), [],
+      shift.reviewed_at, shift.expense_note, shift.review_note, m(shift.expected), m(shift.counted)]), [],
     ["Nozzle", "Fuel", "Opening (L)", "Closing (L)", "Sold (L)"],
     ...data.nozzles.map(nozzle => [nozzle.code, nozzle.fuel, l(nozzle.opening), l(nozzle.closing), l(nozzle.litres)]),
   ];

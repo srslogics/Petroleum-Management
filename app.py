@@ -681,7 +681,7 @@ def daily_owner_report(db, sid, selected, *, in_write=False):
             meter["litres"] += nozzle["litres"]
         fields = ("id", "opened_at", "submitted_at", "submitter", "reviewed_at", "review_note", "reviewer")
         shifts.append({key: row[key] for key in fields} | {
-            key: payload[key] for key in ("expenses", "cash_difference", "sales", "collection_difference", "expense_note")
+            key: payload[key] for key in ("expenses", "expected", "counted", "cash_difference", "sales", "collection_difference", "expense_note")
         } | {"payments": {method: payload["collections"].get(method, 0) for method in METHODS},
              "entries": payload.get("entries", {}), "shift_note": payload.get("shift_note", "")})
     sales = sum(fuel["sales"] for fuel in fuels.values())
