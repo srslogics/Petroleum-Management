@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 
 from automation import AUTOMATION_SCHEMA, Automation, accept_feed
 from security import Throttle, client_address
+from mfa import MFA, MFA_SCHEMA, mfa_cipher
 from manager_drafts import DRAFT_SCHEMA, draft_route, draft_query, unpack_draft
 from outgoings import OUTGOING_SCHEMA, outgoing_route
 from database import TursoDatabase, execute_many, open_db, read_snapshot, transaction
@@ -148,12 +149,13 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 """
 
-SCHEMA += OUTGOING_SCHEMA + DRAFT_SCHEMA + AUTOMATION_SCHEMA
+SCHEMA += OUTGOING_SCHEMA + DRAFT_SCHEMA + AUTOMATION_SCHEMA + MFA_SCHEMA
 
 STATIC_FILES = {
     "/app.js": "text/javascript", "/styles.css": "text/css", "/workspace.css": "text/css", "/daily-report.js": "text/javascript",
     "/typography.css": "text/css", "/money.css": "text/css", "/money.js": "text/javascript", "/outgoings.js": "text/javascript", "/outgoings.css": "text/css",
     "/manager-workflow.js": "text/javascript", "/manager-workflow.css": "text/css",
+    "/mfa.js": "text/javascript",
     "/automation.js": "text/javascript", "/automation.css": "text/css",
     "/fonts/inter-latin.woff2": "font/woff2", "/fonts/inter-latin-ext.woff2": "font/woff2",
     "/tuljai-logo.jpg": "image/jpeg",
@@ -1113,7 +1115,7 @@ def owner_control_route(db, user, method, route, body):
 
 
 class Request:
-    def __init__(self, environ, database, hosted, demo, public_url="https://petroleum-management.onrender.com", automation_env=None, assets=None, throttle=None, allowed_hosts=(), render_proxy=False):
+    def __init__(self, environ, database, hosted, demo, public_url="https://petroleum-management.onrender.com", automation_env=None, assets=None, throttle=None, allowed_hosts=(), render_proxy=False, mfa=None):
         self.environ = environ
         self.database = database
         self.hosted = hosted
@@ -1124,6 +1126,7 @@ class Request:
         self.throttle = throttle
         self.allowed_hosts = allowed_hosts
         self.render_proxy = render_proxy
+        self.mfa = mfa
 
     def payload(self, limit=JSON_BODY_LIMIT):
         if self.environ.get("CONTENT_TYPE", "").partition(";")[0].strip().lower() != "application/json":
@@ -1179,6 +1182,16 @@ class Request:
             fail("This account cannot access this app.", 403)
         return dict(user)
 
+    def mfa_password(self, db, user, password):
+        self.limit("mfa-password", user["id"], 10, 300)
+        if not isinstance(password, str) or len(password) > 200 or not valid_unicode(password):
+            fail("Enter your current password.")
+        account = db.execute("SELECT salt, password_hash FROM users WHERE id = ?", (user["id"],)).fetchone()
+        if not account or not secrets.compare_digest(password_hash(password, account["salt"]), account["password_hash"]):
+            fail("The current password is incorrect.", 422)
+        self.throttle.clear(("mfa-password", user["id"]))
+        return account["salt"]
+
     def api(self, method, path):
         match = re.fullmatch(r"/api/(manager|owner)(/.*)", path)
         if not match:
@@ -1216,6 +1229,16 @@ class Request:
                 token = secrets.token_urlsafe(32)
                 expiry = 12 * 60 * 60
                 with transaction(db, immediate=True):
+                    factor = self.mfa.factor(db, user["id"])
+                    if factor:
+                        self.mfa.require_cipher()
+                        if not data.get("code"):
+                            return {"mfa_required": True}, None
+                        self.limit("mfa-code", user["id"], 10, 300)
+                        recovered = self.mfa.consume(db, user["id"], factor, data["code"])
+                        if recovered:
+                            db.execute("DELETE FROM sessions WHERE user_id = ?", (user["id"],))
+                            audit_account(db, user["station_id"], user["id"], user["id"], "mfa_recovery")
                     db.execute("DELETE FROM sessions WHERE expiry <= ?", (int(time.time()),))
                     issued = db.execute("""INSERT INTO sessions(token_hash, user_id, expiry)
                         SELECT ?, id, ? FROM users WHERE id = ? AND salt = ? AND login_id = ?
@@ -1241,6 +1264,15 @@ class Request:
                 with transaction(db, immediate=True):
                     db.execute("DELETE FROM sessions WHERE token_hash = ?", (self.token(role),))
                 return {"ok": True}, self.session_cookie(role, "", 0)
+            if route == "/mfa" or route.startswith("/mfa/"):
+                if method == "POST" and route != "/mfa/setup":
+                    self.limit("mfa-code", user["id"], 10, 300)
+                result = self.mfa.manage(db, user, route, method, data, self.token(role),
+                                         lambda password: self.mfa_password(db, user, password),
+                                         lambda action: audit_account(db, sid, user["id"], user["id"], action))
+                if method == "POST" and route in ("/mfa/enable", "/mfa/disable"):
+                    return result, self.session_cookie(role, "", 0)
+                return result, None
             if method == "GET" and route == "/session":
                 result = user
             elif role == "manager" and route == "/shift":
@@ -1406,6 +1438,7 @@ def create_app(database=None, env=None):
     if hosted and parsed.scheme != "https":
         raise RuntimeError("Hosted deployments require an HTTPS public app URL.")
     throttle = Throttle()
+    mfa = MFA(mfa_cipher(env.get("MFA_ENCRYPTION_KEY")), fail)
     automation_env = {key: env[key] for key in ("OPENAI_API_KEY", "AUTOMATION_OCR_MODEL") if env.get(key)}
     assets = {}
     for key, filename in [(key, key.lstrip("/")) for key in STATIC_FILES] + [("index", "index.html")]:
@@ -1415,7 +1448,7 @@ def create_app(database=None, env=None):
 
     def application(environ, start_response):
         request = Request(environ, database, hosted, demo, public_url, automation_env, assets,
-                          throttle=throttle, allowed_hosts=allowed_hosts, render_proxy=env.get("RENDER") == "true")
+                          throttle=throttle, allowed_hosts=allowed_hosts, render_proxy=env.get("RENDER") == "true", mfa=mfa)
         status, body, content_type, cookie = request.dispatch()
         path = environ["PATH_INFO"]
         cache_control = "no-store"

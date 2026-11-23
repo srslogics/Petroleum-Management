@@ -468,6 +468,29 @@ class HostedTest(unittest.TestCase):
         self.addCleanup(transport.stop)
         transport.start()
 
+    def test_hosted_mfa_enrollment_and_recovery_survive_restart(self):
+        from cryptography.fernet import Fernet
+        from mfa import totp
+        env = self.env | {"MFA_ENCRYPTION_KEY": Fernet.generate_key().decode()}
+        database = TursoDatabase.from_env(env, required=True)
+        setup_owner(database, env, "9000000001", "OwnerFixture-2026!")
+        browser = Browser(create_app(env=env), "pump.onrender.com", "https://pump.onrender.com")
+        credentials = {"identifier": "9000000001", "password": "OwnerFixture-2026!"}
+        login = "/api/owner/login"
+        self.assertEqual(browser.request(login, credentials)[0], 200)
+        with patch("mfa.time.time", return_value=1_800_000_000):
+            status, setup = browser.request("/api/owner/mfa/setup", {"password": credentials["password"]})
+            self.assertEqual(status, 200, setup)
+            code = totp(setup["setup_key"], 1_800_000_000 // 30)
+            status, enabled = browser.request("/api/owner/mfa/enable", {"code": code})
+            self.assertEqual(status, 200, enabled)
+        restarted = Browser(create_app(env=env), "pump.onrender.com", "https://pump.onrender.com")
+        self.assertEqual(restarted.request(login, credentials), (200, {"mfa_required": True}))
+        self.assertEqual(restarted.request("/api/owner/session")[0], 401)
+        recovery = credentials | {"code": enabled["recovery_codes"][0]}
+        self.assertEqual(restarted.request(login, recovery)[0], 200)
+        self.assertEqual(restarted.request(login, recovery)[0], 422)
+
     def test_hosted_origin_allowlist_and_security_headers(self):
         env = self.env | {"RENDER_EXTERNAL_URL": "https://pump.onrender.com",
                           "PUBLIC_APP_URL": "https://station.example.com"}

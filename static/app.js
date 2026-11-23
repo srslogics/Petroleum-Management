@@ -92,6 +92,9 @@ function showLogin(message = "") {
             <button id="password-toggle" class="password-toggle" type="button" aria-controls="password">Show password</button>
           </div>
         </div>
+        <div id="sign-in-verification" hidden>
+          <label>Authenticator or recovery code<input name="code" autocomplete="one-time-code" maxlength="40" disabled></label>
+        </div>
         <div class="form-error" role="alert">${safe(message)}</div>
         <button class="primary">Sign in ${icon("arrow")}</button>
       </form>
@@ -114,7 +117,14 @@ function showLogin(message = "") {
     login.querySelector(".primary").focus();
   });
   bindForm("login", async form => {
-    await api("/login", fields(form));
+    const result = await api("/login", fields(form));
+    if (result.mfa_required) {
+      document.querySelector("#sign-in-verification").hidden = false;
+      form.elements.code.disabled = false;
+      form.elements.code.required = true;
+      form.elements.code.focus();
+      return;
+    }
     await showHome();
   }, false);
 }
@@ -124,6 +134,7 @@ function shell(content, view = "home") {
   const navigation = role === "owner"
     ? [["home", "Overview"], ["daily-report", "Daily report"], ["money", "Money"], ["payroll", "Payroll"], ["payables", "Payables"], ["automation", "Automation"], ["operations", "Operations"], ["exceptions", "Exceptions"], ["settings", "Settings"], ["team", "Team"]]
     : [["home", "Shift operations"], ["requests", "Owner requests"]];
+  navigation.push(["security", "Account security"]);
   const shouldFocus = document.activeElement && document.activeElement !== document.body;
   if (installBar) document.body.append(installBar);
   root.innerHTML = `<a class="skip-link" href="#main-content">Skip to main content</a>
@@ -166,6 +177,7 @@ function shell(content, view = "home") {
     document.querySelector("#login").elements.identifier.focus();
   });
   listen("home", showHome);
+  listen("security", openAccountSecurity);
   if (role === "manager") listen("requests", openManagerRequests);
   if (role === "owner") {
     listen("settings", openSettings);
@@ -632,7 +644,8 @@ function showTeam(managers, added = false) {
     const events = await api("/account-audit");
     const labels = {create: "Account created", disable: "Account disabled", enable: "Account enabled",
       edit: "Account updated", reset_password: "Password reset", revoke_sessions: "Sessions revoked",
-      owner_reset: "Owner credentials reset"};
+      owner_reset: "Owner credentials reset", mfa_enabled: "Verification enabled",
+      mfa_disabled: "Verification disabled", mfa_recovery: "Recovery code used"};
     moneyDialog("Account activity", events.length
       ? '<div class="recorded-entries">' + events.map(event =>
         `<div><strong>${safe(labels[event.action] || event.action)}</strong><p>${safe(event.target)}</p>
@@ -708,6 +721,7 @@ function navigationIcon(id) {
     automation: '<path d="m13 2-9 12h7l-1 8L21 9h-8l0-7Z"/>',
     operations: '<path d="M5 20V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v15M3 20h14M8 7h4v4H8zM15 12h2a2 2 0 0 1 2 2v3a1 1 0 0 0 2 0V8l-3-3"/>',
     exceptions: '<path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v4m0 4h.01"/>',
+    security: '<path d="M12 22s7-4 7-11V6l-7-3-7 3v5c0 7 7 11 7 11Z"/><path d="m9 12 2 2 4-4"/>',
     settings: '<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/>',
     team: '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 5v2"/>',
     requests: '<path d="M21 11a8 8 0 0 1-8 8H4l-2 3V11a9 9 0 0 1 19 0Z"/><path d="M7 10h9m-9 4h6"/>',
