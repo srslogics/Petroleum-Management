@@ -1,9 +1,10 @@
 """Owner outgoing ledgers. Amounts are integer paise; corrections retain history."""
+from collections import defaultdict
 import re
 from contextlib import nullcontext
 import sqlite3
 from datetime import date
-from database import read_snapshot, transaction
+from database import execute_many, read_snapshot, transaction
 
 OUTGOING_SCHEMA = """
 CREATE TABLE IF NOT EXISTS payroll_staff (
@@ -70,27 +71,40 @@ class Ledger:
             self.fail('Payment and bill dates cannot be in the future.')
         return value
 
-    def state(self, writing=False):
-        queries = [(f"SELECT {'id, name' if table == 'users' else '*'} FROM {table} WHERE station_id = ? ORDER BY id DESC", (self.sid,))
-                   for table in ('payroll_staff', 'payroll_salaries', 'payable_bills', 'outgoing_entries', 'users')]
-        rows = ([list(self.db.execute(sql, args)) for sql, args in queries] if writing
-                else read_snapshot(self.db, queries))
+    def state_queries(self):
+        return [(f"SELECT {'id, name' if table == 'users' else '*'} FROM {table} WHERE station_id = ? ORDER BY id DESC", (self.sid,))
+                for table in ('payroll_staff', 'payroll_salaries', 'payable_bills', 'outgoing_entries', 'users')]
+
+    def state(self, writing=False, rows=None):
+        if rows is None:
+            queries = self.state_queries()
+            rows = [list(result) for result in execute_many(self.db, queries)] if writing else read_snapshot(self.db, queries)
         staff, salaries, bills, entries, users = [[dict(row) for row in group] for group in rows]
         names = {row['id']: row['name'] for row in users}
         for row in staff + salaries + bills + entries:
             row['actor'] = names.get(row['user_id'], 'Owner')
             row['void_actor'] = names.get(row.get('voided_by'), '')
-        active = [row for row in entries if not row['voided_at']]
+        payments = defaultdict(int)
+        advances = defaultdict(int)
+        for entry in entries:
+            if entry['voided_at']:
+                continue
+            if entry['salary_id'] is not None:
+                payments['salary', entry['salary_id']] += entry['amount']
+            if entry['bill_id'] is not None:
+                payments['bill', entry['bill_id']] += entry['amount']
+            if entry['kind'] in ('advance', 'advance_return'):
+                advances[entry['staff_id']] += entry['amount'] * (1 if entry['kind'] == 'advance' else -1)
         for row in salaries + bills:
-            key = 'salary_id' if 'staff_id' in row else 'bill_id'
-            row['paid'] = sum(e['amount'] for e in active if e[key] == row['id'])
+            kind = 'salary' if 'staff_id' in row else 'bill'
+            row['paid'] = payments[kind, row['id']]
             row['net'] = row['amount'] - row.get('advance_applied', 0)
             row['balance'] = 0 if row['voided_at'] else row['net'] - row['paid']
             row['overdue'] = row['balance'] > 0 and row['due_date'] < self.today
+            if kind == 'salary' and not row['voided_at']:
+                advances[row['staff_id']] -= row['advance_applied']
         for row in staff:
-            row['advance_balance'] = sum(e['amount'] * (1 if e['kind'] == 'advance' else -1)
-                for e in active if e['staff_id'] == row['id'] and e['kind'] in ('advance', 'advance_return')) - sum(
-                s['advance_applied'] for s in salaries if s['staff_id'] == row['id'] and not s['voided_at'])
+            row['advance_balance'] = advances[row['id']]
         return dict(staff=staff, salaries=salaries, bills=bills, entries=entries, today=self.today)
 
     def find(self, state, group, value):

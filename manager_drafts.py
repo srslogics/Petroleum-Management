@@ -12,6 +12,19 @@ CREATE TABLE IF NOT EXISTS manager_shift_drafts (
 """
 
 
+def draft_query(sid, shift_id=None):
+    sql = """SELECT d.*, u.name AS actor FROM manager_shift_drafts d
+             JOIN users u ON u.id = d.saved_by JOIN shifts s ON s.id = d.shift_id
+             WHERE d.station_id = ? AND s.submitted_at IS NULL"""
+    return (sql + " AND d.shift_id = ?", (sid, shift_id)) if shift_id is not None else (sql, (sid,))
+
+
+def unpack_draft(saved):
+    if saved:
+        return dict(version=saved['version'], data=json.loads(saved['data_json']), saved_at=saved['saved_at'], actor=saved['actor'])
+    return dict(version=0, data=None, saved_at=None, actor=None)
+
+
 def draft_route(db, user, method, route, body, *, fail, note, now, in_transaction=False):
     match = re.fullmatch(r'/shifts/([0-9]{1,18})/draft', route)
     if not match:
@@ -23,9 +36,9 @@ def draft_route(db, user, method, route, body, *, fail, note, now, in_transactio
             fail('Shift not found.', 404)
         if shift['submitted_at']:
             fail('This shift is already submitted. Its draft cannot be changed.', 409)
-        saved = db.execute('SELECT d.*, u.name AS actor FROM manager_shift_drafts d JOIN users u ON u.id = d.saved_by WHERE d.shift_id = ? AND d.station_id = ?', (shift_id, sid)).fetchone()
+        saved = db.execute(*draft_query(sid, shift_id)).fetchone()
         if method == 'GET':
-            return dict(version=saved['version'], data=json.loads(saved['data_json']), saved_at=saved['saved_at'], actor=saved['actor']) if saved else dict(version=0, data=None, saved_at=None, actor=None)
+            return unpack_draft(saved)
         if method != 'POST':
             fail('Page not found.', 404)
         version = body.get('version')

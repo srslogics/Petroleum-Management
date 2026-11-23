@@ -174,3 +174,23 @@ input:hover, textarea:hover, select:hover { border-color: #9ca9b5; }
   .workspace-body { margin: 0; }
   .workspace-body .page { max-width: none; padding: 0; }
 }
+
+.app-nav .nav-button[aria-busy="true"] {
+  opacity: .65;
+  cursor: progress;
+}
+.app-nav .nav-button[aria-busy="true"]::after {
+  content: "";
+  width: .8em;
+  height: .8em;
+  flex: none;
+  margin-left: auto;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: navigation-spin .7s linear infinite;
+}
+@keyframes navigation-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .app-nav .nav-button[aria-busy="true"]::after { animation: none; }
+}
