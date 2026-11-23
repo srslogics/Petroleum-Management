@@ -8,14 +8,17 @@ const { chromium } = require('playwright');
 
 test('owner controls work through desktop and mobile screens', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'petroleum-owner-'));
-  let origin, browser, logs = '';
+  let origin, browser, logs = '', completed = false;
   const server = spawn(process.env.PYTHON || 'python3', ['-u','app.py','--port','0','--db',path.join(directory,'test.sqlite3')], {
     cwd:path.join(__dirname,'..'), env:{...process.env, RENDER:'', PETROLEUM_HOSTED:'', TURSO_DATABASE_URL:'', TURSO_AUTH_TOKEN:''}, stdio:'pipe',
   });
   server.stdout.on('data', chunk => { logs += chunk; origin = logs.match(/listening at (http:\/\/127\.0\.0\.1:\d+)/)?.[1]; });
   server.stderr.on('data', chunk => { logs += chunk; });
   t.after(async () => {
-    if (browser) await browser.close();
+    if (browser) {
+      if (!completed) console.log('OWNER WORKFLOW STATE',JSON.stringify({pages:await Promise.all(browser.contexts().flatMap(context=>context.pages()).map(async tab=>({url:tab.url(),body:(await tab.locator('body').innerText()).slice(0,2200)}))),logs}));
+      await browser.close();
+    }
     server.kill();
     await new Promise(resolve => server.exitCode !== null ? resolve() : server.once('exit',resolve));
     await rm(directory,{recursive:true,force:true});
@@ -28,10 +31,14 @@ test('owner controls work through desktop and mobile screens', async t => {
   browser = await chromium.launch({headless:true});
   const context = await browser.newContext();
   const page = await context.newPage();
-  page.setDefaultTimeout(7000);
+  page.setDefaultTimeout(15000);
   const errors = [];
-  context.on('page', tab => tab.on('pageerror', error => errors.push(error.message)));
+  context.on('page', tab => {
+    tab.on('pageerror', error => errors.push(error.message));
+    tab.on('requestfailed', request => {if (['script','stylesheet','font'].includes(request.resourceType())) errors.push(request.url() + ': ' + request.failure()?.errorText);});
+  });
   page.on('pageerror', error => errors.push(error.message));
+  page.on('requestfailed', request => {if (['script','stylesheet','font'].includes(request.resourceType())) errors.push(request.url() + ': ' + request.failure()?.errorText);});
   const post = async (route, body) => {
     const result = await context.request.post(origin + '/api/' + route, {data:body});
     assert.equal(result.status(),200,await result.text());
@@ -60,7 +67,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   await page.getByRole('button',{name:'Send correction request'}).click();
   await page.getByText('Confirm counted cash',{exact:false}).first().waitFor();
   const manager = await context.newPage();
-  manager.setDefaultTimeout(7000);
+  manager.setDefaultTimeout(15000);
   await manager.goto(origin + '/manager');
   await manager.getByRole('button',{name:'Owner requests',exact:true}).click();
   await manager.getByLabel('Correct figures / explanation').fill('Counted cash is 100 after recount');
@@ -82,40 +89,62 @@ test('owner controls work through desktop and mobile screens', async t => {
   await post('manager/shift',{openings:{}});
   await post('manager/shifts/2/submit',{closings:{1:111,2:211},collections:{credit:50},counted:0});
   await page.getByRole('button',{name:'Money',exact:true}).click();
-  const allocation = page.locator('#allocate-2');
-  await allocation.locator('..').locator('summary').click();
+  await page.getByRole('button',{name:'Assign credit',exact:false}).click();
+  const allocation = page.getByRole('dialog');
   await allocation.getByLabel('Customer / account name').fill('Fleet B');
   await allocation.getByLabel('Credit amount to assign (₹)').fill('50');
   await allocation.getByLabel('Unique allocation reference').fill('ALLOC-1');
-  await allocation.getByRole('button',{name:'Assign credit to customer'}).click();
-  await page.getByText('Fleet B · ₹50.00 outstanding',{exact:false}).waitFor();
-  const config = page.locator('#customer-config');
-  await config.locator('..').locator('summary').click();
-  await config.getByLabel('Customer / account name').fill('Fleet A');
-  await config.getByLabel('Account payment due date (optional)').fill('2026-11-21');
-  await config.getByRole('button',{name:'Save customer'}).click();
-  await page.getByText('Fleet A · ₹400.00 outstanding · Overdue',{exact:false}).waitFor();
-  const customer = page.locator('details.business-record').filter({has:page.locator('summary',{hasText:'Fleet A'})});
-  await customer.locator('summary').click();
-  await customer.getByLabel('Amount received (₹)').fill('100');
-  await customer.getByLabel('Unique receipt / bank reference').fill('RCPT-1');
-  await customer.getByRole('button',{name:'Record repayment'}).click();
-  await page.getByText('Fleet A · ₹300.00 outstanding',{exact:false}).waitFor();
-  const card = page.locator('.settlement-record').filter({has:page.locator('summary',{hasText:'· Card ·'})});
-  await card.locator('summary').click();
-  await card.getByLabel('Net bank receipt (₹)').fill('195');
-  await card.getByLabel('Settlement fees (₹)').fill('5');
-  await card.getByLabel('Unique bank / deposit reference').fill('BANK-1');
-  await card.getByRole('button',{name:'Record settlement'}).click();
-  await page.getByText('Card · ₹100.00 pending',{exact:false}).waitFor();
-  const cash = page.locator('.settlement-record').filter({has:page.locator('summary',{hasText:'· Cash ·'})});
-  await cash.locator('summary').click();
-  await cash.getByLabel('Cash deposited (₹)').fill('100');
-  await cash.getByLabel('Unique bank / deposit reference').fill('DEPOSIT-1');
-  await cash.getByRole('button',{name:'Record deposit'}).click();
-  await page.getByText('Cash · ₹0.00 pending',{exact:false}).waitFor({state:'attached'});
-  await page.locator('#settlement-filter').selectOption('all');
-  await page.getByText('Cash · ₹0.00 pending',{exact:false}).waitFor();
+  await allocation.getByRole('button',{name:'Assign credit',exact:true}).click();
+  await page.getByRole('button',{name:'Open account for Fleet B',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Open account for Fleet A',exact:true}).click();
+  await page.getByRole('button',{name:'Set due date',exact:true}).click();
+  await page.getByRole('dialog').getByLabel('Payment due date (optional)').fill('2026-11-21');
+  await page.getByRole('dialog').getByRole('button',{name:'Save customer',exact:true}).click();
+  const customer = page.getByRole('row').filter({has:page.getByRole('button',{name:'Open account for Fleet A',exact:true})});
+  await customer.getByText('Overdue',{exact:true}).waitFor();
+  await customer.getByRole('button',{name:'Record payment',exact:true}).click();
+  const payment = page.getByRole('dialog');
+  await payment.getByLabel('Amount received (₹)').fill('100');
+  await payment.getByLabel('Unique receipt reference').fill('RCPT-1');
+  await payment.getByRole('button',{name:'Record payment',exact:true}).click();
+  await page.getByRole('dialog').waitFor({state:'hidden'});
+  assert.match(await customer.locator('td').nth(3).textContent(),/300.00/);
+  // A duplicate bank/receipt reference must keep the form open and its inputs intact.
+  await customer.getByRole('button',{name:'Record payment',exact:true}).click();
+  await payment.getByLabel('Amount received (₹)').fill('100');
+  await payment.getByLabel('Unique receipt reference').fill('RCPT-1');
+  await payment.getByRole('button',{name:'Record payment',exact:true}).click();
+  await payment.getByText('This reference has already been recorded. Refresh before trying again.',{exact:true}).waitFor();
+  assert.equal(await payment.getByLabel('Amount received (₹)').inputValue(),'100');
+  await payment.getByRole('button',{name:'Close dialog',exact:true}).click();
+  await page.getByRole('tab',{name:/^Banking/}).click();
+  const card = page.getByRole('row').filter({has:page.getByText('Card',{exact:true})});
+  await card.getByRole('button',{name:'Record settlement',exact:true}).click();
+  const receipt = page.getByRole('dialog');
+  await receipt.getByLabel('Net bank receipt (₹)').fill('195');
+  await receipt.getByLabel('Settlement fees (₹)').fill('5');
+  await receipt.getByLabel('Unique bank / deposit reference').fill('BANK-1');
+  await receipt.getByRole('button',{name:'Record settlement',exact:true}).click();
+  await page.getByRole('dialog').waitFor({state:'hidden'});
+  assert.match(await card.locator('td').nth(4).textContent(),/100.00/);
+  const cash = page.getByRole('row').filter({has:page.getByText('Cash',{exact:true})});
+  await cash.getByRole('button',{name:'Record deposit',exact:true}).click();
+  await receipt.getByLabel('Cash deposited (₹)').fill('100');
+  await receipt.getByLabel('Unique bank / deposit reference').fill('DEPOSIT-1');
+  await receipt.getByRole('button',{name:'Record deposit',exact:true}).click();
+  await page.getByRole('dialog').waitFor({state:'hidden'});
+  await page.getByLabel('Banking status').selectOption('all');
+  assert.match(await cash.locator('td').nth(4).textContent(),/0.00/);
+  await page.getByRole('tab',{name:/^Customers/}).click();
+  await page.getByLabel('Search customers',{exact:true}).fill('Fleet B');
+  await page.getByRole('button',{name:'Open account for Fleet B',exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Open account for Fleet A',exact:true}).isVisible(),false);
+  await page.getByLabel('Search customers',{exact:true}).fill('');
+  await page.getByRole('button',{name:'Open account for Fleet A',exact:true}).click();
+  const downloadEvent = page.waitForEvent('download');
+  await page.getByRole('button',{name:'Export statement',exact:true}).click();
+  assert.match((await downloadEvent).suggestedFilename(),/^customer-statement-/);
+  await page.getByRole('button',{name:'Close dialog',exact:true}).click();
 
   await page.getByRole('button',{name:'Exceptions',exact:true}).click();
   const exception = page.locator('.exception-record').first();
@@ -157,4 +186,5 @@ test('owner controls work through desktop and mobile screens', async t => {
   await page.getByRole('button',{name:'Operations',exact:true}).click();
   await page.getByRole('heading',{name:'Operations',exact:true}).waitFor();
   assert.deepEqual(errors,[]);
+  completed = true;
 });

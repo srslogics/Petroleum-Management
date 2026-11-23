@@ -93,8 +93,15 @@ test('typography stays consistent across roles, reports, phone layouts and offli
   for (const name of ['Daily report','Money','Operations','Exceptions','Settings','Team']) {
     await page.getByRole('button',{name,exact:true}).click();
     await page.locator('h1').filter({hasText:name === 'Settings' ? 'Station settings' : name === 'Exceptions' ? 'Exception inbox' : name}).waitFor();
-    if (name === 'Money') await page.locator('.business-record summary').filter({hasText:'Fleet A'}).click();
+
     await audit('owner-'+name.toLowerCase().replace(' ','-'),{table:['Money','Daily report'].includes(name)});
+    if (name === 'Money') {
+      await page.getByRole('button',{name:'Open account for Fleet A',exact:true}).click();
+      await audit('money-account-drawer',{table:true});
+      await page.getByRole('dialog').getByRole('button',{name:'Record payment',exact:true}).click();
+      await audit('money-payment-form');
+      await page.getByRole('button',{name:'Close dialog',exact:true}).click();
+    }
     if (name === 'Daily report') {
       await page.emulateMedia({media:'print'});
       assert.equal(await page.locator('.workspace-sidebar').isVisible(),false);

@@ -129,7 +129,7 @@ function shell(content, view = "home") {
     <div class="app-shell">
       <aside class="workspace-sidebar" aria-label="Workspace">
         ${brand()}
-        <p class="sidebar-caption">${role === "owner" ? "Station management" : "Daily operations"}</p>
+        <p class="sidebar-caption">${role === "owner" ? "Workspace" : "Daily operations"}</p>
         <nav class="app-nav" aria-label="${roleTitle} navigation">${navigation.map(([id, label]) =>
           `<button class="nav-button" id="${id}" type="button" ${view === id ? 'aria-current="page"' : ""}>${navigationIcon(id)}<span>${label}</span></button>`
         ).join("")}</nav>
@@ -177,6 +177,7 @@ function listen(id, action, event = "click") {
       }
       const notice = document.querySelector("#notice");
       if (notice) {
+        notice.className = "notice";
         notice.hidden = false;
         notice.textContent = error.message;
       }

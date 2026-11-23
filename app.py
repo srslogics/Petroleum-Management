@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 
 STATIC_FILES = {
     "/app.js": "text/javascript", "/styles.css": "text/css", "/workspace.css": "text/css", "/daily-report.js": "text/javascript",
-    "/typography.css": "text/css",
+    "/typography.css": "text/css", "/money.css": "text/css", "/money.js": "text/javascript",
     "/fonts/inter-latin.woff2": "font/woff2", "/fonts/inter-latin-ext.woff2": "font/woff2",
     "/tuljai-logo.jpg": "image/jpeg",
     "/manager-entries.js": "text/javascript",
@@ -1235,6 +1235,8 @@ def create_app(database=None, env=None):
 
 
 class LocalServer(ThreadingMixIn, WSGIServer):
+    # Browsers open a burst of connections for scripts, styles and font subsets.
+    request_queue_size = 128
     daemon_threads = True
 
 

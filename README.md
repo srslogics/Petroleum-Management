@@ -131,7 +131,7 @@ The owner navigation includes **Money**, **Operations** and **Exceptions** along
 
 ### Customer credit and repayments
 
-In **Money**, named credit entries from submitted shifts create customer balances. Customer names are matched without letter case; managers should consistently use the same account name. Use **Add a customer or set a payment due date** to set an account-level due date. Each customer has a transaction statement and CSV download. Outstanding balances past their due date appear in Exceptions.
+In **Money**, named credit entries from submitted shifts create customer balances. Customer names are matched without letter case; managers should consistently use the same account name. Use **Add customer** to create an account. Open a customer and choose **Set due date** to update its account-level payment date. Each customer has a transaction statement and CSV download. Outstanding balances past their due date appear in Exceptions.
 
 Credit entered only as a shift total remains visibly **unallocated**. Assign that credit to one or more customers in Money, within the remaining balance, using unique allocation references. Allocations do not change the shift's sales or collections.
 
@@ -166,3 +166,11 @@ Both roles, sign-in, reports and the offline screen use the shared scale in `sta
 Inter Variable 5.3.0 is bundled in `static/fonts` under the adjacent SIL Open Font License. Fonts load from the app's origin, including the rupee glyph, with system fallback for scripts outside the bundled subsets. The service worker stores these public typography assets for the offline screen. No external font service is required.
 
 `npm test` checks actual font loading, headings, inputs, buttons, tables, small text, overflow and offline typography across owner and manager screens at 1440px, 1024px, 390px and 320px widths.
+
+### Money workspace
+
+Money separates work into **Customers**, **Banking** and **Activity**. The summary cards show customer dues, pending UPI/card receipts, cash awaiting deposit and customer payments received this month. Unassigned credit appears only when an allocation is needed.
+
+Search or filter the customer list, open an account for its statement, or choose **Record payment**. **Add customer**, payments, credit assignment and bank receipts open focused dialogs instead of showing every form at once. On phones, customer balances and pending bank amounts stay visible; tap a customer or banking source for its details and actions.
+
+Banking filters pending/completed receipts and payment methods. Activity retains the money trail and provides the audited void workflow. **How this works** (or **Money help** on phones) contains accounting guidance outside the main working lists.
