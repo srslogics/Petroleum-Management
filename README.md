@@ -174,3 +174,17 @@ Money separates work into **Customers**, **Banking** and **Activity**. The summa
 Search or filter the customer list, open an account for its statement, or choose **Record payment**. **Add customer**, payments, credit assignment and bank receipts open focused dialogs instead of showing every form at once. On phones, customer balances and pending bank amounts stay visible; tap a customer or banking source for its details and actions.
 
 Banking filters pending/completed receipts and payment methods. Activity retains the money trail and provides the audited void workflow. **How this works** (or **Money help** on phones) contains accounting guidance outside the main working lists.
+
+### Payroll and Payables
+
+Owners can use **Payroll** for staff salaries and advances, and **Payables** for supplier invoices and other business bills. Staff are separate from manager login accounts. Both workspaces use the shared typography, focused forms and phone layouts.
+
+In Payroll, add staff with a unique code and optional monthly salary default. Prepare one salary per staff member and month using the actual amount earned. An advance remains outstanding until it is returned or explicitly applied when preparing a salary. The amount applied reduces the salary left to pay. Salary payments may be partial; inactive staff can still receive existing dues or return advances. Changing a staff salary default does not change prepared salaries. Taxes, attendance and statutory deductions are not calculated automatically.
+
+In Payables, record a supplier invoice or other bill with its payee, reference, amount, description, bill date and due date. The summary shows outstanding, overdue, due within seven days and payments recorded this month. Each partial payment reduces the remaining balance. The same active invoice reference cannot be entered twice for the same payee (case insensitive).
+
+Payment records require an amount, payment date, cash/bank method and a unique reference across both outgoing ledgers. They record payments already made; they do not transfer funds or modify shift collections, till cash, sales or incoming customer receipts. Advance returns are receipts against the staff advance balance, not bill payments or salary payments.
+
+Open a salary, bill or payment to see its details and payment history. To correct an error, void it with a reason and enter a replacement. Void linked payments before voiding their salary or bill; reverse returns or salary recovery before voiding an advance that has been used. Voided records remain in history, and payment references remain reserved to prevent accidental duplicates. A voided salary month or invoice may be replaced. Staff profile edits affect the current staff register; salary and payment amounts retain their original values.
+
+The additive schema is initialized automatically for SQLite and Turso. Payroll and Payables are owner-only and scoped to the signed-in station. Balances are checked inside write transactions to prevent concurrent overpayments. `python3 -m unittest discover -s tests -v` tests ledger rules, station isolation, migrations, persistence and Turso compatibility. `npm test` exercises the actual forms, failures, searches, phone layouts and existing application workflows.

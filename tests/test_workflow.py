@@ -85,7 +85,7 @@ class WorkflowTest(unittest.TestCase):
     def test_only_versioned_public_assets_are_cached(self):
         html = self.expect(200, "/owner").decode()
         self.assertEqual(self.browser.response_headers["/owner"]["Cache-Control"], "no-store")
-        for asset in ("/styles.css", "/workspace.css", "/money.css", "/money.js", "/typography.css", "/fonts/inter-latin.woff2", "/app.js", "/daily-report.js", "/tuljai-logo.jpg"):
+        for asset in ("/styles.css", "/workspace.css", "/money.css", "/money.js", "/outgoings.css", "/outgoings.js", "/typography.css", "/fonts/inter-latin.woff2", "/app.js", "/daily-report.js", "/tuljai-logo.jpg"):
             versioned = re.search(re.escape(asset) + r"\?v=[a-f0-9]{16}", html)[0]
             self.assertEqual(self.expect(200, versioned), self.expect(200, asset))
             self.assertIn("immutable", self.browser.response_headers[versioned]["Cache-Control"])
@@ -560,6 +560,28 @@ class HostedTest(unittest.TestCase):
         self.assertEqual(state["settlements"][0]["remaining"], 0)
         self.assertEqual(state["tanks"]["Petrol"]["capacity"], 10000000)
         self.assertEqual(state["corrections"][0]["reason"], "Confirm reference")
+
+    def test_hosted_outgoing_ledgers_persist(self):
+        database = TursoDatabase.from_env(self.env, required=True)
+        setup_owner(database, self.env, "9000000001", "TestOw7")
+        browser = Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
+        def request(route, data=None, expected=200):
+            status, body = browser.request('/api/owner' + route, data)
+            self.assertEqual(status, expected, body)
+            return body
+        request('/login', {'identifier':'9000000001','password':'TestOw7'})
+        request('/payroll/staff', {'name':'Staff','code':'S1','monthly_salary':10000})
+        request('/outgoings/payments', {'kind':'advance','source_id':1,'amount':1000,'paid_on':'2026-11-22','method':'bank','reference':'A1'})
+        request('/payroll/salaries', {'staff_id':1,'period':'2026-11','amount':10000,'advance_applied':1000,'due_date':'2026-11-30'})
+        request('/payables/bills', {'kind':'other','payee':'Electricity','reference':'B1','amount':2000,'bill_date':'2026-11-01','due_date':'2026-11-30','note':'November'})
+        request('/outgoings/payments', {'kind':'bill','source_id':1,'amount':500,'paid_on':'2026-11-22','method':'bank','reference':'P1'})
+        request('/outgoings/payments', {'kind':'bill','source_id':1,'amount':500,'paid_on':'2026-11-22','method':'bank','reference':'p1'},409)
+        restarted = Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
+        restarted.cookies = browser.cookies.copy()
+        self.assertEqual(restarted.request('/api/owner/payroll')[1]['salaries'][0]['balance'],900000)
+        self.assertEqual(restarted.request('/api/owner/payables')[1]['bills'][0]['balance'],150000)
+        request('/outgoings/entry/2/void', {'reason':'Wrong payment'})
+        self.assertEqual(request('/payables')['bills'][0]['balance'],200000)
 
     def test_reset_owner_preserves_account_and_revokes_sessions(self):
         env = self.env

@@ -90,7 +90,7 @@ test('typography stays consistent across roles, reports, phone layouts and offli
   await page.getByRole('button',{name:'Sign in',exact:true}).click();
   await page.getByRole('heading',{name:'Station overview'}).waitFor();
   await audit('owner-overview',{table:true});
-  for (const name of ['Daily report','Money','Operations','Exceptions','Settings','Team']) {
+  for (const name of ['Daily report','Money','Payroll','Payables','Operations','Exceptions','Settings','Team']) {
     await page.getByRole('button',{name,exact:true}).click();
     await page.locator('h1').filter({hasText:name === 'Settings' ? 'Station settings' : name === 'Exceptions' ? 'Exception inbox' : name}).waitFor();
 

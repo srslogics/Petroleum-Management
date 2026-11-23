@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, urlsplit
 from wsgiref.simple_server import WSGIServer, make_server
 from zoneinfo import ZoneInfo
 
+from outgoings import OUTGOING_SCHEMA, outgoing_route
 from database import TursoDatabase, execute_many, open_db, read_snapshot, transaction
 
 ROOT = Path(__file__).resolve().parent
@@ -125,10 +126,11 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 """
 
+SCHEMA += OUTGOING_SCHEMA
 
 STATIC_FILES = {
     "/app.js": "text/javascript", "/styles.css": "text/css", "/workspace.css": "text/css", "/daily-report.js": "text/javascript",
-    "/typography.css": "text/css", "/money.css": "text/css", "/money.js": "text/javascript",
+    "/typography.css": "text/css", "/money.css": "text/css", "/money.js": "text/javascript", "/outgoings.js": "text/javascript", "/outgoings.css": "text/css",
     "/fonts/inter-latin.woff2": "font/woff2", "/fonts/inter-latin-ext.woff2": "font/woff2",
     "/tuljai-logo.jpg": "image/jpeg",
     "/manager-entries.js": "text/javascript",
@@ -848,6 +850,9 @@ def business_state(db, sid, *, in_write=False):
 
 
 def owner_control_route(db, user, method, route, body):
+    outgoing = outgoing_route(db, user, method, route, body, now=now, fail=fail, number=number, note=note)
+    if outgoing is not None:
+        return outgoing
     sid = user["station_id"]
     if method == "GET" and route == "/business":
         return business_state(db, sid)
