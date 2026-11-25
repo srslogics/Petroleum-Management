@@ -1,7 +1,10 @@
 "use strict";
 
-async function openAccountSecurity() {
-  const state = await api("/mfa");
+function openAccountSecurity() {
+  return role === "owner" ? loadOwnerView("/mfa", showAccountSecurity) : api("/mfa").then(showAccountSecurity);
+}
+
+function showAccountSecurity(state) {
   shell(`${heading("", "Account security", "Use an authenticator app for a second sign-in check.")}
     <section class="card">
       <h2>Two-step verification</h2>

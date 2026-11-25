@@ -65,6 +65,45 @@ test('owner controls work through desktop and mobile screens', async t => {
   assert.equal(destination.searchParams.get('text'), 'Hello & welcome!');
   await popup.close();
   await compose.getByRole('button',{name:'Close dialog'}).click();
+  await page.getByRole('region',{name:'Quick actions'}).getByRole('button',{name:'Add bill'}).click();
+  const quickBill = page.getByRole('dialog',{name:'Add bill',exact:true});
+  await quickBill.getByLabel('Supplier / payee').waitFor();
+  await quickBill.getByRole('button',{name:'Close dialog'}).click();
+  await page.getByRole('button',{name:'Overview',exact:true}).click();
+  await page.getByRole('region',{name:'Quick actions'}).getByRole('button',{name:'Add salary'}).click();
+  const quickSalary = page.getByRole('dialog',{name:'Add staff first',exact:true});
+  await quickSalary.getByRole('button',{name:'Add staff member'}).click();
+  const addStaff = page.getByRole('dialog',{name:'Add staff',exact:true});
+  await addStaff.getByLabel('Staff name').waitFor();
+  await addStaff.getByRole('button',{name:'Close dialog'}).click();
+  await page.getByRole('button',{name:'Overview',exact:true}).click();
+  await page.getByRole('region',{name:'Quick actions'}).getByRole('button',{name:'Add customer'}).click();
+  const addCustomer = page.getByRole('dialog',{name:'Add customer',exact:true});
+  await addCustomer.getByLabel('Customer / account name').waitFor();
+  await addCustomer.getByRole('button',{name:'Close dialog'}).click();
+  await page.getByRole('button',{name:'Overview',exact:true}).click();
+
+  // Navigating away while a request is in flight keeps the newly selected page.
+  let releaseRequest;
+  let started;
+  const pendingOperations = new Promise(resolve => { started = resolve; });
+  await page.route('**/api/owner/business/operations', async route => {
+    const response = await route.fetch();
+    await new Promise(resolve => {
+      releaseRequest = () => resolve(route.fulfill({response}));
+      started();
+    });
+  }, {times:1});
+  await page.getByRole('button',{name:'Operations',exact:true}).click();
+  await pendingOperations;
+  await page.getByRole('button',{name:'Money',exact:true}).click();
+  await page.getByRole('heading',{name:'Money',exact:true}).waitFor();
+  const priorResponse = page.waitForResponse('**/api/owner/business/operations');
+  await releaseRequest();
+  await (await priorResponse).finished();
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await page.getByRole('heading',{name:'Money',exact:true}).isVisible(), true);
+  await page.getByRole('button',{name:'Overview',exact:true}).click();
   await page.getByRole('button',{name:'View operations',exact:true}).click();
   await page.getByRole('heading',{name:'Current open shift'}).waitFor();
   assert.match(await page.locator('main').textContent(),/Asha Patil/);
@@ -78,7 +117,8 @@ test('owner controls work through desktop and mobile screens', async t => {
 
   // A correction request is answered by the manager, applied by the owner, and audited.
   await page.getByRole('button',{name:'Overview',exact:true}).click();
-  await page.getByRole('button',{name:'Open shift 1 report'}).click();
+  await page.getByRole('button',{name:'Review next shift'}).click();
+  await page.getByRole('heading',{name:'Shift #1',exact:true}).waitFor();
   await page.locator('#request-correction').getByLabel('Ask the manager to clarify or correct').fill('Confirm counted cash');
   await page.getByRole('button',{name:'Send correction request'}).click();
   await page.getByText('Confirm counted cash',{exact:false}).first().waitFor();
@@ -198,9 +238,19 @@ test('owner controls work through desktop and mobile screens', async t => {
   await accountAudit.getByText('Account disabled',{exact:true}).waitFor();
   await accountAudit.getByRole('button',{name:'Close dialog'}).click();
 
-  for (const nav of ['Overview','Money','Operations','Exceptions','Team']) {
+  const more = page.getByRole('button',{name:'More',exact:true});
+  assert.equal(await more.getAttribute('aria-expanded'), 'false');
+  assert.equal(await page.getByRole('button',{name:'Team',exact:true}).count(), 0);
+  await more.click();
+  await page.getByRole('button',{name:'Team',exact:true}).focus();
+  await page.keyboard.press('Escape');
+  assert.equal(await more.getAttribute('aria-expanded'), 'false');
+  assert.equal(await more.evaluate(element => element === document.activeElement), true);
+  for (const nav of ['Overview','Money','Payroll','Payables','Operations','Exceptions','Automation','Settings','Team','Account security']) {
+    if (!['Overview','Money'].includes(nav)) await more.click();
     await page.getByRole('button',{name:nav,exact:true}).click();
-    await page.waitForTimeout(150);
+    await page.locator('.app-nav button[aria-current=page]', {hasText:nav}).waitFor({state:'attached'});
+    assert.equal(await more.getAttribute('aria-expanded'), 'false');
     const overflow = await page.evaluate(() => ({ width:innerWidth, scroll:document.documentElement.scrollWidth, elements:[...document.querySelectorAll('body *')].filter(el => el.getBoundingClientRect().right > innerWidth + 1).slice(0,8).map(el => el.tagName + '.' + el.className) }));
     assert.ok(overflow.scroll <= overflow.width + 1, nav + ' overflows: ' + JSON.stringify(overflow));
   }
@@ -218,6 +268,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   await page.getByRole('button',{name:'Sign in',exact:true}).click();
   await page.getByRole('heading',{name:'Station overview'}).waitFor();
   assert.equal(await page.locator('#install-app').count(),1);
+  if (await more.isVisible()) await more.click();
   await page.getByRole('button',{name:'Operations',exact:true}).click();
   await page.getByRole('heading',{name:'Operations',exact:true}).waitFor();
   assert.deepEqual(errors,[]);

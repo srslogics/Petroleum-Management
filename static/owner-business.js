@@ -28,11 +28,12 @@ const businessText = (label, name, required = true, limit = 150) => `<label>${la
 const businessNote = (label = 'Note', name = 'note', required = false, limit = 500) => `<label>${label}<textarea name="${name}" ${required ? 'required' : ''} maxlength="${limit}" rows="2"></textarea></label>`;
 const businessDate = (label, name, value, required = true) => `<label>${label}<input type="date" name="${name}" value="${safe(value)}" ${required ? 'required' : ''}></label>`;
 
-async function openBusiness(view = 'operations') {
-  const data = await api('/business/' + view);
-  if (view === 'money') showMoney(data);
-  else if (view === 'exceptions') showExceptions(data);
-  else showOperations(data);
+function openBusiness(view = 'operations', afterRender) {
+  const render = {money: showMoney, exceptions: showExceptions, operations: showOperations}[view];
+  return loadOwnerView('/business/' + view, data => {
+    render(data);
+    afterRender?.(data);
+  });
 }
 
 function saveBusinessForm(id, route, extra, view) {
@@ -83,7 +84,7 @@ function showOperations(data) {
   listen('refresh-operations', () => openBusiness('operations'));
   fuelNames.forEach(fuel => saveBusinessForm('tank-' + fuel, '/tanks', {fuel}, 'operations'));
   data.corrections.forEach(item => {
-    listen('correction-shift-' + item.id, async () => showReport(await api('/shifts/' + item.shift_id)));
+    listen('correction-shift-' + item.id, () => openShiftReport(item.shift_id, 'operations'));
     if (!item.resolved_at) saveBusinessForm('resolve-' + item.id, '/corrections/' + item.id + '/resolve', {}, 'operations');
   });
 }
@@ -103,7 +104,7 @@ function showExceptions(data) {
   data.exceptions.forEach((item, index) => {
     if (item.shift_id) listen('exception-shift-' + index, async () => {
       if (data.active?.id === item.shift_id) await openBusiness('operations');
-      else showReport(await api('/shifts/' + item.shift_id));
+      else await openShiftReport(item.shift_id, 'exceptions');
     });
     if (!item.acknowledgement) saveBusinessForm('ack-' + index, '/exceptions/acknowledge', {key:item.key}, 'exceptions');
   });
@@ -197,10 +198,10 @@ function revisionComparison(item) {
 }
 
 function bindCorrectionPanel(shift, source) {
-  listen('correct-report', () => showClosing({...shift, rates:Object.fromEntries(fuelNames.map(fuel => [fuel, shift.fuels[fuel].rate]))}, shift));
+  listen('correct-report', () => showClosing({...shift, rates:Object.fromEntries(fuelNames.map(fuel => [fuel, shift.fuels[fuel].rate]))}, shift, source));
   bindForm('request-correction', async form => {
     await api('/shifts/' + shift.id + '/corrections', fields(form));
-    showReport(await api('/shifts/' + shift.id), source);
+    await openShiftReport(shift.id, source);
   });
 }
 

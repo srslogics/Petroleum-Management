@@ -11,10 +11,13 @@ const outgoingNote = () => '<label>Note (optional)<textarea name="note" maxlengt
 const outgoingButton = (action,id,label,style='text-button') => `<button type="button" class="${style}" data-action="${action}" data-id="${id}">${label}</button>`;
 const outgoingStatus = row => row.voided_at ? moneyBadge('Voided') : row.balance===0 ? moneyBadge('Paid','positive') : row.overdue ? moneyBadge('Overdue','warning') : moneyBadge(row.paid?'Part paid':'Unpaid');
 
-async function openOutgoings(page) {
-  const data=await api('/'+page);
-  outgoingPage=page;outgoingData=data;
-  renderOutgoings();
+function openOutgoings(page, afterRender) {
+  return loadOwnerView('/' + page, data => {
+    outgoingPage = page;
+    outgoingData = data;
+    renderOutgoings();
+    afterRender?.();
+  });
 }
 function renderOutgoings() {
   const d=outgoingData, payroll=outgoingPage==='payroll', tab=outgoingView[outgoingPage];
@@ -70,7 +73,12 @@ function outgoingStaffForm(staff){
   outgoingForm(staff?'Edit staff':'Add staff',outgoingText('Staff name','name',staff?.name)+outgoingText('Staff code','code',staff?.code||'STF-'+String(Math.max(0,...outgoingData.staff.map(s=>s.id))+1).padStart(3,'0'))+outgoingText('Job title (optional)','job_title',staff?.job_title,false)+outgoingText('Phone (optional)','phone',staff?.phone,false)+outgoingAmount('Monthly salary (₹)','monthly_salary',staff?.monthly_salary||0,true)+'<p class="money-form-hint">Used as the default for new salaries. Existing salary records keep their original amounts.</p>'+(staff?`<label>Staff status<select name="active"><option value="true" ${staff.active?'selected':''}>Active</option><option value="false" ${!staff.active?'selected':''}>Inactive</option></select></label>`:''),'/payroll/staff',staff?{id:staff.id}:{},'Save staff');
 }
 function outgoingSalaryForm(){
-  const staff=outgoingData.staff.find(s=>s.active);if(!staff){moneyDialog('Add staff first','<p>Add an active staff member before preparing a salary.</p>');return;}
+  const staff = outgoingData.staff.find(s => s.active);
+  if (!staff) {
+    moneyDialog('Add staff first', '<p>Add an active staff member before preparing a salary.</p><button id="salary-add-staff" class="primary" type="button">Add staff member</button>');
+    listen('salary-add-staff', () => outgoingStaffForm());
+    return;
+  }
   const dialog=outgoingForm('Add salary',`<label>Staff member<select name="staff_id">${staffOptions(staff.id)}</select></label><div class="money-form-grid"><label>Salary month<input name="period" type="month" max="${outgoingData.today.slice(0,7)}" value="${outgoingData.today.slice(0,7)}" required></label>${businessDate('Payment due date','due_date',outgoingData.today)}</div>${outgoingAmount('Salary earned (₹)','amount',staff.monthly_salary)}${outgoingAmount('Apply advance (₹)','advance_applied',0,true)}<p class="money-form-hint" id="out-advance-hint"></p><div class="outgoing-net" id="out-net"></div>${outgoingNote()}`,'/payroll/salaries',{},'Add salary');
   const form=dialog.querySelector('form');const update=()=>{const person=outgoingStaff(Number(form.elements.staff_id.value));document.querySelector('#out-advance-hint').textContent=`${money(person.advance_balance)} in outstanding advances. Apply only the amount you want to recover this month.`;form.elements.advance_applied.max=(person.advance_balance/100).toFixed(2);document.querySelector('#out-net').textContent='Salary to pay: '+money(Math.round((Number(form.elements.amount.value)-Number(form.elements.advance_applied.value))*100));};form.elements.staff_id.addEventListener('change',()=>{form.elements.amount.value=(outgoingStaff(Number(form.elements.staff_id.value)).monthly_salary/100).toFixed(2);form.elements.advance_applied.value='0.00';update();});form.addEventListener('input',update);update();
 }
