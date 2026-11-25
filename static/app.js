@@ -183,22 +183,36 @@ function showLogin(message = "") {
   }, false);
 }
 
+const ownerNavigation = [
+  ["Station", [["home", "Overview"], ["daily-report", "Daily report"], ["money", "Money"]]],
+  ["Payments", [["payroll", "Payroll"], ["payables", "Payables"]]],
+  ["Station operations", [["operations", "Operations"], ["exceptions", "Exceptions"], ["automation", "Automation"]]],
+  ["Administration", [["settings", "Settings"], ["team", "Team"], ["security", "Account security"]]],
+];
+
+function workspaceNavigation(view) {
+  const links = items => items.map(([id, label]) =>
+    `<button class="nav-button" id="${id}" type="button" ${view === id ? 'aria-current="page"' : ""}>${navigationIcon(id)}<span>${label}</span></button>`
+  ).join("");
+  if (role === "manager") return links([["home", "Shift operations"], ["requests", "Owner requests"], ["security", "Account security"]]);
+  const [[label, primary], ...other] = ownerNavigation;
+  const group = ([heading, items]) => `<div class="owner-nav-group" role="group" aria-label="${heading}"><span class="owner-nav-label" aria-hidden="true">${heading}</span>${links(items)}</div>`;
+  const moreActive = other.some(([, items]) => items.some(([id]) => id === view));
+  return `${group([label, primary])}
+    <button id="owner-more" class="nav-button" type="button" aria-expanded="false" aria-controls="owner-nav-more"${moreActive ? ' data-current' : ''}>${navigationIcon("more")}<span>More</span></button>
+    <div id="owner-nav-more">${other.map(group).join("")}</div>`;
+}
+
 function shell(content, view = "home") {
   stopManagerDraft?.();
-  const navigation = role === "owner"
-    ? [["home", "Overview"], ["daily-report", "Daily report"], ["money", "Money"], ["payroll", "Payroll"], ["payables", "Payables"], ["automation", "Automation"], ["operations", "Operations"], ["exceptions", "Exceptions"], ["settings", "Settings"], ["team", "Team"]]
-    : [["home", "Shift operations"], ["requests", "Owner requests"]];
-  navigation.push(["security", "Account security"]);
   const shouldFocus = document.activeElement && document.activeElement !== document.body;
   if (installBar) document.body.append(installBar);
   root.innerHTML = `<a class="skip-link" href="#main-content">Skip to main content</a>
-    <div class="app-shell">
+    <div class="app-shell ${role === "owner" ? "owner-shell" : ""}">
       <aside class="workspace-sidebar" aria-label="Workspace">
         ${brand()}
-        <p class="sidebar-caption">${role === "owner" ? "Workspace" : "Daily operations"}</p>
-        <nav class="app-nav" aria-label="${roleTitle} navigation">${navigation.map(([id, label]) =>
-          `<button class="nav-button" id="${id}" type="button" ${view === id ? 'aria-current="page"' : ""}>${navigationIcon(id)}<span>${label}</span></button>`
-        ).join("")}</nav>
+        ${role === "manager" ? '<p class="sidebar-caption">Daily operations</p>' : ""}
+        <nav class="app-nav" aria-label="${roleTitle} navigation">${workspaceNavigation(view)}</nav>
         <div class="sidebar-footer"><span class="sidebar-role">${roleTitle}</span><div id="sidebar-install"></div></div>
       </aside>
       <div class="workspace-body">
@@ -221,6 +235,7 @@ function shell(content, view = "home") {
     if (role === "manager" && saveManagerDraftBeforeLogout && !await saveManagerDraftBeforeLogout()
         && !window.confirm("Some shift entries could not be saved. Sign out and discard the unsaved entries in this tab?")) return;
     await api("/logout", {});
+    ownerViewRequest++;
     if (role === "manager") {
       stopManagerDraft?.();
       clearManagerDrafts(session);
@@ -235,6 +250,15 @@ function shell(content, view = "home") {
   listen("security", openAccountSecurity);
   if (role === "manager") listen("requests", openManagerRequests);
   if (role === "owner") {
+    const more = document.getElementById("owner-more");
+    const setMore = expanded => more.setAttribute("aria-expanded", String(expanded));
+    listen("owner-more", () => setMore(more.getAttribute("aria-expanded") !== "true"));
+    nav.addEventListener("keydown", event => {
+      if (event.key !== "Escape" || more.getAttribute("aria-expanded") !== "true") return;
+      event.preventDefault();
+      setMore(false);
+      more.focus();
+    });
     listen("whatsapp-compose", () => openWhatsAppComposer());
     listen("settings", openSettings);
     listen("daily-report", openDailyReport);
@@ -321,12 +345,32 @@ function fuelTag(fuel) {
   return `<span class="fuel-tag ${fuel.toLowerCase()}">${fuel}</span>`;
 }
 
+let ownerViewRequest = 0;
+
+async function loadOwnerView(path, render) {
+  const request = ++ownerViewRequest;
+  try {
+    const state = await api(path);
+    if (request === ownerViewRequest) render(state);
+  } catch (error) {
+    if (request === ownerViewRequest) throw error;
+  }
+}
+
+function ownerDatePath(path, date = selectedDate) {
+  return date ? path + "?date=" + encodeURIComponent(date) : path;
+}
+
 async function showHome() {
-  const state = await api(role === "manager" ? "/shift" :
-    "/dashboard" + (selectedDate ? "?date=" + encodeURIComponent(selectedDate) : ""));
+  if (role === "owner") {
+    return loadOwnerView(ownerDatePath("/dashboard"), state => {
+      session = state.session;
+      showOwner(state);
+    });
+  }
+  const state = await api("/shift");
   session = state.session;
-  if (role === "manager") showManager(state);
-  else await showOwner(state);
+  showManager(state);
 }
 
 function showManager(state) {
@@ -371,7 +415,7 @@ function showManager(state) {
   });
 }
 
-function showClosing(active, original = null) {
+function showClosing(active, original = null, source = "home") {
   shell(`${heading("Shift #" + active.id + " · " + businessDay(active.business_date), original ? "Correct submitted shift" : "Close shift",
     "Enter the closing readings and reconcile the till before submitting.")}
     <form id="close-shift">
@@ -442,7 +486,7 @@ function showClosing(active, original = null) {
       entries: collectEntries(form), shift_note: values.shift_note,
     });
     if (original) {
-      showReport(lastSubmission);
+      showReport(lastSubmission, source);
       showBusinessNotice("Correction saved. Original report retained.");
       return;
     }
@@ -450,7 +494,7 @@ function showClosing(active, original = null) {
   });
   bindManagerEntries(form, active);
   if (original) {
-    listen("cancel-correction", () => showReport(original));
+    listen("cancel-correction", () => showReport(original, source));
     fillCorrectionForm(form, original);
   }
   updatePreview(form, active);
@@ -509,60 +553,84 @@ function reviewStatus(shift) {
   return `<span class="status ${shift.reviewed_at ? "reviewed" : ""}">${shift.reviewed_at ? "Reviewed" : "Awaiting review"}</span>`;
 }
 
+function ownerToday() {
+  const parts = new Intl.DateTimeFormat("en-IN", {
+    year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Kolkata",
+  }).formatToParts(new Date());
+  const date = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return [date.year, date.month, date.day].join("-");
+}
+
 function bindDateFilter(endpoint, render) {
   const control = document.querySelector("#date");
-  const buttons = [...document.querySelectorAll("#print-day, #export-day, #refresh-day, #whatsapp-day")];
-  let request = 0;
-  const update = async (refresh = false) => {
+  const controls = document.querySelector(".report-controls");
+  const buttons = [...controls.querySelectorAll("button")];
+  let dateRequest = 0;
+  const update = async (source = "date") => {
     if (!control.value) control.value = selectedDate;
     const date = control.value;
-    const current = ++request;
-    const isCurrent = () => control.isConnected && current === request && control.value === date;
+    const request = ++ownerViewRequest;
+    const localRequest = ++dateRequest;
+    const isCurrent = () => control.isConnected && request === ownerViewRequest && control.value === date;
     const setBusy = busy => {
       control.setAttribute("aria-busy", String(busy));
       for (const button of buttons) button.disabled = busy;
     };
-    if (date === selectedDate && !refresh) {
+    if (date === selectedDate && source !== "refresh-day") {
       setBusy(false);
       return;
     }
     setBusy(true);
     try {
-      const updated = await api(endpoint + "?date=" + encodeURIComponent(date));
+      const updated = await api(ownerDatePath(endpoint, date));
       if (!isCurrent()) return;
-      await render(updated, isCurrent);
-      document.querySelector(refresh ? "#refresh-day" : "#date")?.focus({ preventScroll: true });
+      render(updated);
+      document.getElementById(source)?.focus({ preventScroll: true });
     } catch (error) {
       if (!isCurrent()) return;
       control.value = selectedDate;
       throw error;
     } finally {
-      if (current === request) setBusy(false);
+      // A newer date within this view owns the busy state until its request settles.
+      if (localRequest === dateRequest && control.isConnected) {
+        control.value = selectedDate;
+        setBusy(false);
+      }
     }
   };
   listen("date", () => update(), "change");
-  if (document.querySelector("#refresh-day")) listen("refresh-day", () => update(true));
+  listen("date-today", () => {
+    control.value = ownerToday();
+    return update("date-today");
+  });
+  if (document.querySelector("#refresh-day")) listen("refresh-day", () => update("refresh-day"));
 }
 
-async function showOwner(data, canRender = () => true) {
+function showOwner(data) {
   const business = data.business;
-  if (!canRender()) return;
   selectedDate = data.date;
   const totalSales = fuelNames.reduce((total, fuel) => total + data.daily[fuel].sales, 0);
   const totalVolume = fuelNames.reduce((total, fuel) => total + data.daily[fuel].litres, 0);
-  const pending = data.shifts.filter(shift => !shift.reviewed_at).length;
+  const waiting = data.shifts.filter(shift => !shift.reviewed_at);
+  const pending = waiting.length;
   const missingRates = fuelNames.some(fuel => !data.setup.fuels[fuel].rate);
   shell(`<div class="dashboard-heading">
-    ${heading("", "Station overview", businessDay(data.date))}
+    ${heading("", "Station overview")}
     <div class="report-controls"><label class="date-control">Business date<input id="date" type="date" value="${safe(data.date)}"></label>
-      <button id="open-daily-report" class="secondary" type="button">Open daily report ${icon("arrow")}</button></div>
+      <button id="date-today" class="secondary" type="button">Today</button>
+      <button id="open-daily-report" class="primary" type="button">Open daily report ${icon("arrow")}</button></div>
   </div>
   ${missingRates ? `<div class="setup-notice"><span class="setup-icon">${icon("warning")}</span>
-    <div><strong>Ready for your first shift?</strong><p>Add Petrol and Diesel rates to get started.</p></div>
+    <div><strong>Set up your first shift</strong><p>Add Petrol and Diesel selling rates.</p></div>
     <button id="setup-rates" class="secondary" type="button">Set fuel rates ${icon("arrow")}</button></div>` : ""}
+  <section class="owner-quick-actions" aria-label="Quick actions">
+    <button id="quick-customer" class="secondary" type="button">${navigationIcon("money")} Add customer</button>
+    <button id="quick-bill" class="secondary" type="button">${navigationIcon("payables")} Add bill</button>
+    <button id="quick-salary" class="secondary" type="button">${navigationIcon("payroll")} Add salary</button>
+  </section>
   <div class="owner-layout">
     <section class="sales-surface" aria-label="Daily fuel sales">
-      <div class="sales-head"><span>Fuel sales</span><span class="sales-period">Selected day</span></div>
+      <div class="sales-head"><h2>Fuel sales</h2><span class="sales-period">${businessDay(data.date)}</span></div>
       <strong class="sales-amount">${money(totalSales)}</strong>
       <p class="sales-caption">${volume(totalVolume)} sold across Petrol and Diesel</p>
       <div class="fuel-performance">${fuelNames.map(fuel => {
@@ -571,16 +639,33 @@ async function showOwner(data, canRender = () => true) {
           <span>${volume(sales.litres)} sold</span><small>Selling rate ${data.setup.fuels[fuel].rate ? money(data.setup.fuels[fuel].rate) + " / L" : "not configured"}</small></div>`;
       }).join("")}</div>
     </section>
-    <aside class="attention-surface">
+    <section class="attention-surface" aria-label="Shift review">
       <h2>Shift review</h2>
       <strong class="review-number">${pending}<span>awaiting review</span></strong>
-      <p>${pending ? "Check the shifts below to finish your review." :
-        data.shifts.length ? "All submitted shifts have been checked." : "Submitted shifts will appear here for review."}</p>
+      ${pending ? "" : `<p>${data.shifts.length ? "All submitted shifts have been reviewed." : "Submitted shifts will appear here for review."}</p>`}
       <dl class="review-breakdown"><div><dt>Submitted</dt><dd>${data.shifts.length}</dd></div>
         <div><dt>Reviewed</dt><dd>${data.shifts.length - pending}</dd></div>
         <div><dt>Cash differences</dt><dd>${data.shifts.filter(shift => shift.cash_difference !== 0).length} shifts</dd></div></dl>
-    </aside>
+      ${pending ? '<button id="review-next-shift" class="primary owner-review-next" type="button">Review next shift ' + icon("arrow") + '</button>' : ""}
+    </section>
     ${businessOverview(business)}
+    <div class="ledger-sheet owner-submitted">
+      <section class="ledger-section">
+        <header class="section-head"><h2 id="shift-heading">Submitted shifts</h2></header>
+        ${data.shifts.length ? `<div class="table-scroll" role="region" aria-labelledby="shift-heading" tabindex="0">
+          <table class="shift-table" role="table">
+          <thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Shift / submitted by</th><th scope="col" role="columnheader">Submitted at</th><th scope="col" role="columnheader" class="numeric">Metered sales</th>
+            <th scope="col" role="columnheader" class="numeric">Cash difference</th><th scope="col" role="columnheader">Review status</th><th scope="col" role="columnheader"><span class="sr-only">Open report</span></th></tr></thead>
+          <tbody role="rowgroup">${data.shifts.map(shift => `<tr role="row">
+            <th scope="row" role="rowheader"><strong>Shift #${shift.id}</strong><small>${safe(shift.submitter)}</small></th>
+            <td role="cell" class="shift-submitted-at">${timestamp(shift.submitted_at)}</td>
+            <td role="cell" class="numeric"><span class="shift-mobile-label" aria-hidden="true">Metered sales</span>${money(shift.sales)}</td>
+            <td role="cell" class="numeric ${shift.cash_difference ? "discrepancy" : ""}"><span class="shift-mobile-label" aria-hidden="true">Cash difference</span>${money(shift.cash_difference)}</td>
+            <td role="cell">${reviewStatus(shift)}</td>
+            <td role="cell" class="shift-report-action"><button class="row-action" id="shift-${shift.id}" type="button" aria-label="Open shift ${shift.id} report"><span class="shift-mobile-label">Open shift</span>${icon("arrow")}</button></td>
+          </tr>`).join("")}</tbody>
+        </table></div>` : '<div class="shift-empty">' + icon("receipt") + '<strong>No submitted shifts yet</strong><p>Once a manager closes a shift, its sales and reconciliation will appear here.</p></div>'}
+      </section></div>
     <section class="inventory-surface">
       <header class="section-head"><div><h2>Fuel inventory</h2><p>Book stock through the latest submitted shift</p></div></header>
       <div class="inventory-grid">${fuelNames.map(fuel => {
@@ -599,33 +684,26 @@ async function showOwner(data, canRender = () => true) {
         </details>`;
       }).join("")}</div>
     </section>
-  </div>
-  <div class="ledger-sheet">
-  <section class="ledger-section">
-    <header class="section-head"><h2 id="shift-heading">Submitted shifts</h2></header>
-    ${data.shifts.length ? `<div class="table-scroll" role="region" aria-labelledby="shift-heading" tabindex="0">
-      <table class="shift-table">
-        <thead><tr><th scope="col">Shift / submitted by</th><th scope="col">Submitted at</th><th scope="col" class="numeric">Metered sales</th>
-          <th scope="col" class="numeric">Cash difference</th><th scope="col">Review status</th><th scope="col"><span class="sr-only">Open report</span></th></tr></thead>
-        <tbody>${data.shifts.map(shift => `<tr>
-          <th scope="row"><strong>Shift #${shift.id}</strong><small>${safe(shift.submitter)}</small></th>
-          <td>${timestamp(shift.submitted_at)}</td><td class="numeric">${money(shift.sales)}</td>
-          <td class="numeric ${shift.cash_difference ? "discrepancy" : ""}">${money(shift.cash_difference)}</td>
-          <td>${reviewStatus(shift)}</td>
-          <td><button class="row-action" id="shift-${shift.id}" type="button" aria-label="Open shift ${shift.id} report">${icon("arrow")}</button></td>
-        </tr>`).join("")}</tbody>
-      </table></div>` : '<div class="shift-empty">' + icon("receipt") + '<strong>No submitted shifts yet</strong><p>Once a manager closes a shift, its sales and reconciliation will appear here.</p></div>'}
-  </section></div>`);
+  </div>`);
   bindBusinessOverview();
+  listen("quick-customer", () => openBusiness("money", data => openCustomerForm(data)));
+  listen("quick-bill", () => openOutgoings("payables", outgoingBillForm));
+  listen("quick-salary", () => openOutgoings("payroll", outgoingSalaryForm));
+  if (pending) listen("review-next-shift", () => openShiftReport(Math.min(...waiting.map(shift => shift.id))));
   if (missingRates) listen("setup-rates", openSettings);
   bindDateFilter("/dashboard", showOwner);
   listen("open-daily-report", openDailyReport);
   for (const shift of data.shifts) {
-    listen("shift-" + shift.id, async () => showReport(await api("/shifts/" + shift.id)));
+    listen("shift-" + shift.id, () => openShiftReport(shift.id));
   }
 }
 
+function openShiftReport(id, source = "home") {
+  return loadOwnerView("/shifts/" + id, shift => showReport(shift, source));
+}
+
 function showReport(shift, source = "home") {
+  const sourceLabel = { home: "Overview", "daily-report": "Daily report", operations: "Operations", exceptions: "Exceptions" }[source];
   const cashRows = [
     ...Object.entries(methodNames).map(([method, label]) => [label, shift.collections[method]]),
     ["Total collections", shift.collection_total],
@@ -635,7 +713,7 @@ function showReport(shift, source = "home") {
     ["Actual cash counted", shift.counted],
     ["Cash difference (actual − expected)", shift.cash_difference, true],
   ];
-  shell(`<button id="back" type="button" class="text-button back">← ${source === "daily-report" ? "Daily report" : "Daily dashboard"}</button>
+  shell(`<button id="back" type="button" class="text-button back">← ${sourceLabel}</button>
     ${heading("Submitted shift", "Shift #" + shift.id, businessDay(shift.business_date) +
       " · Submitted by " + shift.submitter + " at " + timestamp(shift.submitted_at))}
     <div class="work-grid"><div class="stack">
@@ -677,14 +755,18 @@ function showReport(shift, source = "home") {
       ${shift.expense_note ? `<p class="review-note"><strong>Expense note</strong> ${safe(shift.expense_note)}</p>` : ""}
     </aside></div>`, source);
   bindCorrectionPanel(shift, source);
-  listen("back", source === "daily-report" ? openDailyReport : showHome);
+  listen("back", () => {
+    if (source === "home") return showHome();
+    if (source === "daily-report") return openDailyReport();
+    return openBusiness(source);
+  });
   if (!shift.review) {
     bindForm("review", async form => showReport(await api("/shifts/" + shift.id + "/review", fields(form)), source));
   }
 }
 
-async function openTeam() {
-  showTeam(await api("/managers"));
+function openTeam() {
+  return loadOwnerView("/managers", showTeam);
 }
 
 function showTeam(managers, added = false) {
@@ -728,9 +810,8 @@ function showTeam(managers, added = false) {
   });
 }
 
-async function openSettings() {
-  const dashboard = await api("/settings");
-  showSettings(dashboard.setup, dashboard.can_edit_opening_stock);
+function openSettings() {
+  return loadOwnerView("/settings", data => showSettings(data.setup, data.can_edit_opening_stock));
 }
 
 function showSettings(setup, canEditStock, confirmation = "") {
@@ -782,6 +863,7 @@ initialize();
 
 function navigationIcon(id) {
   const paths = {
+    more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
     home: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     'daily-report': '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/>',
     money: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M16 14h2"/>',

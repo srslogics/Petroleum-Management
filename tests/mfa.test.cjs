@@ -40,6 +40,7 @@ test('both apps can enroll an authenticator and sign in with a recovery code', a
     };
     await page.goto(origin+'/'+role);
     await signIn();
+    if (role === 'owner') await page.getByRole('button',{name:'More',exact:true}).click();
     await page.getByRole('button',{name:'Account security'}).click();
     await page.getByLabel('Current password').fill(password);
     await page.getByRole('button',{name:'Set up authenticator'}).click();
@@ -60,6 +61,7 @@ test('both apps can enroll an authenticator and sign in with a recovery code', a
     await signIn();
     await verification.fill(recoveryCode);
     await page.getByRole('button',{name:'Verify and sign in',exact:true}).click();
+    if (role === 'owner') await page.getByRole('button',{name:'More',exact:true}).click();
     await page.getByRole('button',{name:'Account security'}).click();
     await page.getByText('On for this account.',{exact:true}).waitFor();
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));

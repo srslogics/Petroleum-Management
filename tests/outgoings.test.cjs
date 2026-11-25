@@ -39,6 +39,7 @@ test('Payroll and Payables support staff, advances, salaries, bills, partial pay
   await bill.getByRole('button',{name:'Pay / details',exact:true}).click();await dialog.getByRole('button',{name:'Void this record',exact:true}).click();await dialog.getByLabel('Reason for voiding').fill('Revised invoice');await save('Void record');await addBill('supplier','Fuel Supplier','INV-1','9000');
   const capture=process.env.SCREENSHOT_DIR;if(capture)await mkdir(capture,{recursive:true});
   for(const view of ['Payroll','Payables']){
+    await page.setViewportSize({width:1440,height:1000});
     await page.getByRole('button',{name:view,exact:true}).click();
     if(view==='Payroll')await page.getByRole('tab',{name:'Salaries',exact:true}).click();
     for(const width of [1440,390,320]){await page.setViewportSize({width,height:1000});await page.evaluate(()=>document.fonts.ready);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),view+' overflow at '+width);assert.ok(await page.locator('.money-stat strong').evaluateAll(nodes=>nodes.every(n=>n.clientHeight<=parseFloat(getComputedStyle(n).lineHeight)+2)),view+' wrapped summary value');if(capture&&width!==390)await page.screenshot({path:path.join(capture,view.toLowerCase()+'-'+width+'.png'),fullPage:true});}

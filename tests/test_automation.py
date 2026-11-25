@@ -216,8 +216,9 @@ class AutomationTest(unittest.TestCase):
 
     def test_worker_is_idempotent_and_pending_approvals_survive_restart(self):
         self.staff();self.rule()
-        self.assertEqual(run_once(self.path,{})[0]['created_drafts'],1)
-        self.assertEqual(run_once(self.path,{})[0]['created_drafts'],0)
+        with patch('automation_runner.now', return_value='2026-11-23T12:00:00+05:30'):
+            self.assertEqual(run_once(self.path,{})[0]['created_drafts'],1)
+            self.assertEqual(run_once(self.path,{})[0]['created_drafts'],0)
         self.assertEqual(len(self.state()['drafts']),1)
         with closing(open_db(self.path)) as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM automation_summaries').fetchone()[0],1)

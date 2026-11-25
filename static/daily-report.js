@@ -20,8 +20,8 @@ function reportTable(id, columns, rows) {
   </div>`;
 }
 
-async function openDailyReport() {
-  showDailyReport(await api("/daily-report" + (selectedDate ? "?date=" + encodeURIComponent(selectedDate) : "")));
+function openDailyReport() {
+  return loadOwnerView(ownerDatePath("/daily-report"), showDailyReport);
 }
 
 function showDailyReport(data) {
@@ -34,6 +34,7 @@ function showDailyReport(data) {
   </div><div class="dashboard-heading">
     ${heading(businessDay(data.date), "Daily report", reportStation())}
     <div class="report-controls"><label class="date-control">Business date<input id="date" type="date" value="${safe(data.date)}"></label>
+      <button id="date-today" class="secondary" type="button">Today</button>
       <button id="refresh-day" class="secondary" type="button">Refresh report</button>
       <button id="whatsapp-day" class="secondary" type="button">Share via WhatsApp</button>
       <button id="print-day" class="secondary" type="button">Print</button>
@@ -131,7 +132,7 @@ function showDailyReport(data) {
   listen("print-day", () => window.print());
   listen("export-day", () => downloadDailyReport(data));
   for (const shift of shifts) {
-    listen("day-shift-" + shift.id, async () => showReport(await api("/shifts/" + shift.id), "daily-report"));
+    listen("day-shift-" + shift.id, () => openShiftReport(shift.id, "daily-report"));
   }
 }
 

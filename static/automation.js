@@ -10,7 +10,13 @@ const autoEmpty=(title,description)=>moneyEmpty(title,description);
 const autoTable=(heads,rows)=>`<div class="table-scroll auto-table"><table class="money-table"><thead><tr>${heads.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
 function automationDownload(name,text,type='text/plain'){const url=URL.createObjectURL(new Blob([text],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function automationCSV(rows){return '\ufeff'+rows.map(row=>row.map(value=>{let text=String(value??'');if(/^[\s\u0000-\u001f]*[=+@-]/.test(text))text="'"+text;return '"'+text.replaceAll('"','""')+'"';}).join(',')).join('\r\n');}
-async function openAutomation(tab=automationTab){automationTab=tab;automationData=await api('/automation');renderAutomation();}
+function openAutomation(tab = automationTab) {
+  return loadOwnerView('/automation', data => {
+    automationTab = tab;
+    automationData = data;
+    renderAutomation();
+  });
+}
 function renderAutomation(){
   const d=automationData,tabs=[['imports','Imports'],['recurring','Recurring drafts'],['alerts','Alerts'],['reports','Reports'],['connections','Connections']];
   shell(`<div class="money-heading"><div>${heading('','Automation','Import figures, prepare routine records and review what needs attention.')}</div><div class="money-heading-actions">${autoButton('import',0,'+ Import CSV','secondary')}${autoButton('document',0,'Read a document','secondary')}${autoButton('run',0,'Refresh automations','primary')}</div></div>

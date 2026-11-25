@@ -117,8 +117,9 @@ test('Manager entry drafts, simple totals, cash counter and final submission wor
   await owner.getByRole('button', {name:'Share via WhatsApp'}).click();
   assert.match(await share.getByLabel('Message', {exact:true}).inputValue(), /1 January 2020[\s\S]*No shifts were submitted/);
   await share.getByRole('button', {name:'Close dialog'}).click();
-  await owner.getByLabel('Business date').fill(shift.business_date);
+  await owner.getByRole('button', {name:'Today', exact:true}).click();
   await owner.getByRole('button', {name:'Shift #1', exact:true}).waitFor();
+  assert.equal(await owner.getByLabel('Business date').inputValue(), shift.business_date);
   await owner.getByRole('button', {name:'Overview', exact:true}).click();
   await owner.getByRole('button', {name:'Open shift 1 report'}).waitFor();
   assert.match(await owner.getByRole('region', {name:'Daily fuel sales'}).textContent(), /1,968\.00/);
