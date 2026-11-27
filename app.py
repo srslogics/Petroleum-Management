@@ -162,6 +162,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 SCHEMA += OUTGOING_SCHEMA + DRAFT_SCHEMA + AUTOMATION_SCHEMA + MFA_SCHEMA
 
 STATIC_FILES = {
+    "/theme.css": "text/css",
     "/app.js": "text/javascript", "/styles.css": "text/css", "/workspace.css": "text/css", "/daily-report.js": "text/javascript",
     "/typography.css": "text/css", "/money.css": "text/css", "/money.js": "text/javascript", "/outgoings.js": "text/javascript", "/outgoings.css": "text/css",
     "/manager-workflow.js": "text/javascript", "/manager-workflow.css": "text/css",

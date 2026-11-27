@@ -7,7 +7,7 @@
 .auto-history summary { cursor:pointer; }
 .auto-alerts { padding:0 24px 24px; margin:0; list-style:none; }
 .auto-alerts li { display:flex; gap:14px; padding:16px 0; border-bottom:1px solid var(--line); }
-.auto-alerts .icon { flex:none; margin-top:3px; color:#926419; }
+.auto-alerts .icon { flex:none; margin-top:3px; color:var(--warning); }
 .auto-alerts p { color:var(--muted); margin-top:4px; font-size:var(--text-small); }
 .auto-report { padding:0 24px 24px; }
 .auto-report .money-stats { margin-bottom:16px; }
