@@ -1,9 +1,9 @@
-:root { color: #182738; background: #f3f5f7; }
+:root { color: var(--ink); background: var(--background); }
 body { margin: 0; padding: max(24px, env(safe-area-inset-top)) 20px; }
 main { max-width: 410px; margin: 10vh auto; }
-img { object-fit: contain; background: white; border-radius: 12px; }
-p { color: #47596c; }
-a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; color: white; background: #163d68; border-radius: 8px; text-decoration: none; }
-a:focus-visible { outline: 3px solid #265d92; outline-offset: 3px; }
+img { object-fit: contain; background: var(--paper); border-radius: 12px; }
+p { color: var(--muted); }
+a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; color: var(--paper); background: var(--accent); border-radius: 8px; text-decoration: none; }
+a:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 
 main > :is(h1, p, a) { margin-top: 1.25rem; }

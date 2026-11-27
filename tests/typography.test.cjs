@@ -99,7 +99,7 @@ test('typography stays consistent across roles, reports, phone layouts and offli
       };
     });
     assert.equal(layout.card,false);
-    assert.match(layout.surfaceBackground,/^linear-gradient/);
+    assert.match(layout.surfaceBackground,/^linear-gradient\(.*rgb\(12, 34, 60\).*rgb\(21, 92, 131\)/);
     assert.equal(layout.brandBackground,'rgba(0, 0, 0, 0)');
     assert.equal(layout.formBackground,'rgba(0, 0, 0, 0)');
     assert.equal(layout.hasHorizontalScroll,false);
@@ -130,6 +130,7 @@ test('typography stays consistent across roles, reports, phone layouts and offli
   await page.getByRole('button',{name:'Sign in',exact:true}).click();
   await page.getByRole('heading',{name:'Station overview'}).waitFor();
   await audit('owner-overview',{table:true});
+  assert.match(await page.getByRole('region',{name:'Daily fuel sales'}).evaluate(element => getComputedStyle(element).backgroundImage), /rgb\(12, 34, 60\)/);
   const submitted = page.getByRole('region',{name:'Submitted shifts'});
   assert.ok(await submitted.evaluate(region => region.scrollWidth <= region.clientWidth + 1));
   await submitted.getByRole('button',{name:'Open shift 1 report'}).waitFor();
@@ -178,7 +179,7 @@ test('typography stays consistent across roles, reports, phone layouts and offli
   await page.getByRole('heading',{name:'Sign in',exact:true}).waitFor();
   await audit('manager-sign-in');
 
-  // The offline fallback must keep both the font and stylesheet after the network disappears.
+  // The offline fallback must keep its typography and colors after the network disappears.
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready;
     if (!navigator.serviceWorker.controller) await new Promise(resolve => navigator.serviceWorker.addEventListener('controllerchange',resolve,{once:true}));
@@ -191,6 +192,7 @@ test('typography stays consistent across roles, reports, phone layouts and offli
   await page.goto(origin+'/owner');
   await page.getByRole('heading',{name:'Connect to your station'}).waitFor();
   await audit('offline');
+  assert.equal(await page.locator('html').evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(240, 245, 250)');
   await context.setOffline(false);
   assert.deepEqual(failures,[]);
 });

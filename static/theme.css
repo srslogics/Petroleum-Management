@@ -1,0 +1,44 @@
+/* Navy lettering, blue buildings and amber flame from the Tuljai logo. */
+:root {
+  color-scheme: light;
+  --navy: #0c223c;
+  --navy-mid: #103b61;
+  --navy-light: #155c83;
+  --brand-blue: #167ba9;
+  --brand-cyan: #53c9ed;
+  --brand-orange: #f5a143;
+  --brand-gradient: linear-gradient(145deg, var(--navy), var(--navy-mid) 58%, var(--navy-light));
+
+  --paper: #fff;
+  --background: #f0f5fa;
+  --surface: #f7fafd;
+  --ink: #14283e;
+  --muted: #4c637b;
+  --line: #d9e5ef;
+  --rule: #7891a8;
+  --accent: #095c89;
+  --accent-hover: #06456d;
+  --accent-soft: #e5f3fb;
+  --accent-line: #b6d5e8;
+  --focus: #096da3;
+
+  --warning: #815016;
+  --warning-soft: #fff3df;
+  --warning-line: #ebc88f;
+  --positive: #075e78;
+  --positive-soft: #e3f4f9;
+  --positive-line: #afd8e7;
+  --danger: #993420;
+  --danger-hover: #7d291a;
+  --danger-soft: #fff0eb;
+  --danger-line: #efc1b6;
+  --on-dark: #f7fbff;
+  --on-dark-accent: #ffc482;
+  --on-dark-muted: #d6e8f6;
+  --on-dark-rule: #9bbbd2;
+  --on-dark-line: #d6e8f644;
+  --on-dark-tint: #d6e8f61c;
+  --on-dark-danger: #ffd0c3;
+  --shadow-color: #0c223c12;
+  --backdrop: #0c223c80;
+}
