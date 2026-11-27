@@ -1,6 +1,7 @@
 /* Sign-in and recovery share the same frame and typography as the app. */
 .auth-page {
   --auth-forest: #102d28;
+  --auth-gradient: linear-gradient(150deg, #102923, #0d342e 63%, #285246);
   --auth-action: #17473c;
   --auth-paper: #fffdfa;
   display: grid;
@@ -35,7 +36,7 @@
   gap: 42px;
   padding: clamp(28px, 4vw, 55px);
   overflow: hidden;
-  background: linear-gradient(150deg, #102923, #0d342e 63%, #285246);
+  background: var(--auth-gradient);
   color: #f9f5e9;
 }
 .auth-brand-panel::before {
@@ -143,6 +144,8 @@
 
 body:has(.auth-page--owner) { padding-bottom: 0; }
 .auth-page--owner {
+  --auth-light: #f9f5e9;
+  --auth-muted: #d1ded3;
   --auth-gutter: clamp(20px, 5vw, 72px);
   --auth-left: max(var(--auth-gutter), env(safe-area-inset-left));
   --auth-right: max(var(--auth-gutter), env(safe-area-inset-right));
@@ -152,23 +155,46 @@ body:has(.auth-page--owner) { padding-bottom: 0; }
   gap: 0;
   min-height: 100dvh;
   padding: 0;
-  background: var(--auth-paper);
+  background: var(--auth-gradient);
+  color: var(--auth-light);
+  color-scheme: dark;
 }
 .auth-page--owner .auth-brand-panel {
   grid-area: 1 / 1 / -1 / 2;
+  background: transparent;
   padding: max(var(--auth-gutter), env(safe-area-inset-top)) var(--auth-gutter)
     max(var(--auth-gutter), env(safe-area-inset-bottom)) var(--auth-left);
 }
+.auth-page--owner .auth-brand-panel::before { content: none; }
 .auth-page--owner .auth-content {
   grid-area: 1 / 2;
   padding: max(28px, env(safe-area-inset-top)) var(--auth-right) 28px var(--auth-gutter);
 }
 .auth-page--owner .auth-form-panel { width: min(100%, 400px); }
+.auth-page--owner .auth-heading .eyebrow { color: #c9d69f; }
+.auth-page--owner .auth-heading > p:last-child { color: var(--auth-muted); }
+.auth-page--owner .auth-form :is(input, textarea) {
+  background: #0a2825b3;
+  border-color: #91ab9e;
+  color: var(--auth-light);
+}
+.auth-page--owner .auth-form :is(input, textarea):hover { border-color: var(--auth-light); }
+.auth-page--owner :is(.password-toggle, .text-button) { color: var(--auth-light); }
+.auth-page--owner :is(a, input, button, textarea):focus-visible { outline-color: #e3e7b7; }
+.auth-page--owner .form-error { color: #ffbcb5; }
+.auth-page--owner .auth-primary {
+  background: var(--auth-light);
+  border-color: var(--auth-light);
+  color: var(--auth-forest);
+}
+.auth-page--owner .auth-primary:hover { background: #e5eccc; border-color: #e5eccc; }
 .auth-page--owner .auth-footer {
   grid-area: 2 / 2;
   width: min(calc(100% - var(--auth-gutter) - var(--auth-right)), 400px);
   padding: 0 0 max(16px, env(safe-area-inset-bottom));
 }
+.auth-page--owner .auth-footer > a,
+.auth-page--owner .auth-footer .install-bar button { color: var(--auth-muted); }
 @media (max-width: 680px) {
   .auth-page--owner {
     grid-template-columns: minmax(0, 1fr);

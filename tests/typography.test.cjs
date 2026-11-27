@@ -92,10 +92,16 @@ test('typography stays consistent across roles, reports, phone layouts and offli
       return {
         brand:measure('.auth-brand-panel'), form:measure('.auth-content'), footer:measure('.auth-footer'),
         card:surface.querySelector('.auth-frame') !== null,
+        surfaceBackground:getComputedStyle(surface).backgroundImage,
+        brandBackground:getComputedStyle(surface.querySelector('.auth-brand-panel')).backgroundColor,
+        formBackground:getComputedStyle(surface.querySelector('.auth-content')).backgroundColor,
         hasHorizontalScroll:document.documentElement.scrollWidth > innerWidth + 1,
       };
     });
     assert.equal(layout.card,false);
+    assert.match(layout.surfaceBackground,/^linear-gradient/);
+    assert.equal(layout.brandBackground,'rgba(0, 0, 0, 0)');
+    assert.equal(layout.formBackground,'rgba(0, 0, 0, 0)');
     assert.equal(layout.hasHorizontalScroll,false);
     assert.equal(layout.brand.left,0);
     assert.equal(layout.brand.top,0);
