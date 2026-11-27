@@ -20,8 +20,8 @@ const money = minor => rupees.format(minor / 100);
 const volume = milli => litres.format(milli / 1000) + " L";
 const decimal = (value, scale) => value / scale;
 const timestamp = value => clock.format(new Date(value));
-const businessDay = value => new Intl.DateTimeFormat("en-IN", {
-  dateStyle: "long", timeZone: "Asia/Kolkata",
+const businessDay = (value, dateStyle = "long") => new Intl.DateTimeFormat("en-IN", {
+  dateStyle, timeZone: "Asia/Kolkata",
 }).format(new Date(value + "T00:00:00+05:30"));
 
 const roleTitle = role === "owner" ? "Owner App" : "Station Manager App";
@@ -206,7 +206,7 @@ function shell(content, view = "home") {
   const shouldFocus = document.activeElement && document.activeElement !== document.body;
   if (installBar) document.body.append(installBar);
   root.innerHTML = `<a class="skip-link" href="#main-content">Skip to main content</a>
-    <div class="app-shell ${role === "owner" ? "owner-shell" : ""}">
+    <div class="app-shell ${role === "owner" ? "owner-shell" : "manager-shell"}">
       <aside class="workspace-sidebar" aria-label="Workspace">
         ${brand()}
         ${role === "manager" ? '<p class="sidebar-caption">Daily operations</p>' : ""}
@@ -394,10 +394,10 @@ function showManager(state) {
           })}
         </div>`).join("")}</div>
       </section>
-      <section class="card shift-start"><h2>Selling rates</h2><dl class="key-values">
+      <section class="card card-flow shift-start"><h2>Selling rates</h2><dl class="key-values">
         ${fuelNames.map(fuel => `<div><dt>${fuel}</dt><dd>${setup.fuels[fuel].rate ? money(setup.fuels[fuel].rate) + " / L" : "Not set"}</dd></div>`).join("")}
       </dl>
-      ${missingRates ? '<p class="form-help">Ask the owner to set both fuel rates before opening a shift.</p>'
+      ${missingRates ? `<div class="inline-warning">${icon("warning")}<div><strong>Waiting for fuel rates</strong><p>Ask the owner to set the selling rates in Station settings before you open the shift.</p></div></div>`
         : `${errorbox}<button class="primary">Open shift ${icon("arrow")}</button>`}</section>
     </form>`);
   if (missingRates) {
@@ -746,10 +746,10 @@ function showReport(shift, source = "home") {
       </section>
       ${recordedEntries(shift.entries, shift.shift_note)}
       ${correctionPanel(shift)}
-      <section class="card"><h2>Owner review</h2>
+      <section class="card card-flow"><h2>Owner review</h2>
         ${shift.review ? `<p><span class="status reviewed">Reviewed</span> ${safe(shift.review.reviewer)} · ${timestamp(shift.review.reviewed_at)}</p>
           ${shift.review.review_note ? `<p class="review-note">${safe(shift.review.review_note)}</p>` : ""}`
-          : `<form id="review"><label>Review note <span class="quiet">(optional)</span><textarea name="note" rows="3" maxlength="500"></textarea></label>
+          : `<form id="review" class="business-form"><label>Review note <span class="quiet">(optional)</span><textarea name="note" rows="3" maxlength="500"></textarea></label>
             ${errorbox}<button class="primary">Mark as reviewed</button></form>`}
       </section>
     </div>
@@ -776,25 +776,28 @@ function openTeam() {
 function showTeam(managers, added = false) {
   shell(`${heading("", "Team", "Create and view station manager accounts.")}
     ${added ? '<p class="success" role="status">Manager account created. Share the sign-in details privately.</p>' : ""}
-    <section class="card">
+    <div class="control-columns">
+    <section class="card card-flow">
       <header class="section-head"><h2>Station managers</h2>
         <button id="account-audit" class="secondary" type="button">Account activity</button></header>
-      ${managers.length ? managers.map(manager => managerControls(manager)).join("")
-        : '<p>No manager accounts yet.</p>'}
+      ${managers.length ? '<div class="record-list">' + managers.map(managerControls).join("") + '</div>'
+        : '<p class="inline-empty">No manager accounts yet.</p>'}
     </section>
-    <section class="card">
+    <section class="card card-flow">
       <h2>Add a station manager</h2>
-      <form id="add-manager">
+      <form id="add-manager" class="business-form">
         <div class="field-grid">
           <label>Full name<input name="name" required maxlength="80" autocomplete="off"></label>
           <label>Mobile number<input name="phone" required type="tel" maxlength="24" placeholder="+91" autocomplete="off"></label>
         </div>
-        <label>Password<input name="password" type="password" required minlength="15" maxlength="200"
-          autocomplete="new-password" aria-describedby="manager-password-help"></label>
-        <small id="manager-password-help">Use a password of 15–200 characters.</small>
+        <div><label for="manager-password">Password</label>
+          <input id="manager-password" name="password" type="password" required minlength="15" maxlength="200"
+            autocomplete="new-password" aria-describedby="manager-password-help">
+          <small id="manager-password-help" class="field-help">Use a password of 15–200 characters.</small>
+        </div>
         ${errorbox}<button class="primary">Create manager account</button>
       </form>
-    </section>`, "team");
+    </section></div>`, "team");
   listen("account-audit", async () => {
     const events = await api("/account-audit");
     const labels = {create: "Account created", disable: "Account disabled", enable: "Account enabled",
@@ -840,26 +843,28 @@ function openOpeningStock(setup) {
 function showSettings(setup, canEditStock, confirmation = "") {
   shell(`${heading("", "Station settings", "Manage selling rates, nozzles and opening stock.")}
     ${confirmation ? `<div class="success" role="status">${safe(confirmation)}</div>` : ""}
-    <section class="card"><header class="section-head"><div><h2>Selling rates</h2><p>Rate changes apply when the manager opens a shift.</p></div></header>
-      <form id="rates"><div class="field-grid">
+    <div class="control-columns">
+    <section class="card card-flow"><header class="section-head"><div><h2>Selling rates</h2><p>Rate changes apply when the manager opens a shift.</p></div></header>
+      <form id="rates" class="business-form"><div class="field-grid">
         ${fuelNames.map(fuel => numberField(fuel + " (₹ / L)", fuel, {
           value: setup.fuels[fuel].rate ? decimal(setup.fuels[fuel].rate, 100) : undefined, required: true, min: 0.01, max: 1000,
         })).join("")}
       </div>${errorbox}<button class="primary">Save rates</button></form>
     </section>
-    <section class="card"><h2>Nozzles</h2>
+    <section class="card card-flow"><header class="section-head"><div><h2>Opening stock</h2>
+      <p>${canEditStock ? "Set the starting balance for each fuel before the first submission." : "Starting balances were locked at the first submission."}</p></div>
+      ${canEditStock ? "" : moneyBadge("Locked")}</header>
+      <form id="stock" class="business-form"><div class="field-grid">
+        ${openingStockFields(setup, !canEditStock)}
+      </div>${canEditStock ? errorbox + '<button class="primary">Save opening stock</button>' : ""}</form>
+    </section>
+    <section class="card card-flow full-width-card"><header class="section-head"><div><h2>Nozzles</h2><p>Manage the nozzles used for shift readings.</p></div></header>
       <ul class="nozzle-config">${setup.nozzles.map(nozzle => `<li><strong>${safe(nozzle.code)}</strong> ${fuelTag(nozzle.fuel)}</li>`).join("")}</ul>
-      <form id="nozzle"><div class="field-grid">
+      <form id="nozzle" class="business-form record-actions"><div class="field-grid">
         <label>Nozzle code<input name="code" maxlength="20" required placeholder="P-02"></label>
         <label>Fuel<select name="fuel">${fuelNames.map(fuel => `<option>${fuel}</option>`).join("")}</select></label>
       </div>${errorbox}<button class="primary">Add nozzle</button></form>
-    </section>
-    <section class="card"><header class="section-head"><div><h2>Opening stock</h2>
-      <p>${canEditStock ? "Set the starting balance for each fuel before the first submission." : "Starting balances were locked at the first submission."}</p></div></header>
-      <form id="stock"><div class="field-grid">
-        ${openingStockFields(setup, !canEditStock)}
-      </div>${canEditStock ? errorbox + '<button class="primary">Save opening stock</button>' : ""}</form>
-    </section>`, "settings");
+    </section></div>`, "settings");
   const save = (id, field, feedback) => bindForm(id, async form => {
     await api("/settings", { [field]: fields(form) });
     const dashboard = await api("/settings");

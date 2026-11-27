@@ -144,6 +144,7 @@ test('typography stays consistent across roles, reports, phone layouts and offli
     await page.locator('h1').filter({hasText:name === 'Settings' ? 'Station settings' : name === 'Exceptions' ? 'Exception inbox' : name}).waitFor();
 
     await audit('owner-'+name.toLowerCase().replace(' ','-'),{table:['Money','Daily report'].includes(name)});
+    if (name === 'Automation') assert.ok(await page.locator('.auto-tabs').evaluate(tabs => tabs.scrollWidth <= tabs.clientWidth + 1));
     if (name === 'Money') {
       await page.getByRole('button',{name:'Open account for Fleet A',exact:true}).click();
       await audit('money-account-drawer',{table:true});
@@ -169,6 +170,7 @@ test('typography stays consistent across roles, reports, phone layouts and offli
   await page.goto(origin+'/manager');
   await page.getByRole('heading',{name:'Open a shift',exact:true}).waitFor();
   await audit('manager-opening');
+  assert.ok(await page.getByRole('navigation',{name:'Station Manager App navigation'}).evaluate(nav => nav.scrollWidth <= nav.clientWidth + 1));
   await page.getByRole('button',{name:'Open shift',exact:true}).click();
   await page.getByRole('heading',{name:'Shift entries',exact:true}).waitFor();
   await page.getByRole('button',{name:'Collections',exact:true}).click();
