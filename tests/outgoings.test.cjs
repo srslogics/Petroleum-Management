@@ -33,10 +33,52 @@ test('Payroll and Payables support staff, advances, salaries, bills, partial pay
   await addBill('supplier','Fuel Supplier','INV-1','10000');await addBill('other','Electricity Board','BILL-2','2000');
   await page.getByLabel('Search names or references').fill('Fuel');assert.equal(await page.locator('[data-out-row]:visible').count(),1);await page.getByLabel('Search names or references').fill('missing');await page.getByRole('heading',{name:'No matching records'}).waitFor();await page.getByLabel('Search names or references').fill('');
   let bill=page.getByRole('row').filter({has:page.getByRole('button',{name:'Fuel Supplier',exact:true})});await bill.getByRole('button',{name:'Pay / details',exact:true}).click();await dialog.getByRole('button',{name:'Record payment',exact:true}).click();await dialog.getByLabel('Amount paid (₹)').fill('3000');await dialog.getByLabel('Unique payment reference').fill('BILL-PAY-1');await save('Record payment');assert.match(await bill.locator('td').nth(3).textContent(),/7,000.00/);
+
+  // Route the WhatsApp handoff to a local mock, so the test sends no bill to anyone.
+  await context.route('https://wa.me/**', route => route.fulfill({body:'WhatsApp test page'}));
+  const share = page.getByRole('dialog',{name:'Share bill on WhatsApp'});
+  const receiver = share.getByLabel('WhatsApp number (optional)');
+  const message = share.getByLabel('Message',{exact:true});
+  const openWhatsApp = async () => {
+    const popupEvent = page.waitForEvent('popup');
+    await share.getByRole('button',{name:'Open WhatsApp',exact:true}).click();
+    const popup = await popupEvent;
+    const destination = new URL(popup.url());
+    await popup.close();
+    return destination;
+  };
+  await bill.getByRole('button',{name:'Pay / details',exact:true}).click();
+  await dialog.getByRole('button',{name:'Share on WhatsApp',exact:true}).click();
+  const draft = await message.inputValue();
+  for (const info of ['Fuel Supplier','INV-1','Bill date','Payment due','₹10,000.00','₹3,000.00','₹7,000.00','November purchase']) {
+    assert.ok(draft.includes(info),`Bill draft is missing ${info}`);
+  }
+  assert.ok(!draft.includes('BILL-PAY-1'));
+  assert.equal(await receiver.inputValue(),'');
+  const choosingContact = await openWhatsApp();
+  assert.equal(choosingContact.origin + choosingContact.pathname,'https://wa.me/');
+  assert.equal(choosingContact.searchParams.get('text'),draft);
+  await close();
+
+  await page.setViewportSize({width:320,height:780});
+  await bill.getByRole('button',{name:'Share bill INV-1 for Fuel Supplier on WhatsApp',exact:true}).click();
+  assert.equal(await message.inputValue(),draft);
+  assert.ok(await share.evaluate(element=>element.getBoundingClientRect().width <= innerWidth));
+  await receiver.fill('+91 90000-00000');
+  await message.fill(draft + '\nPlease review & file.');
+  const choosingNumber = await openWhatsApp();
+  assert.equal(choosingNumber.origin + choosingNumber.pathname,'https://wa.me/919000000000');
+  assert.equal(choosingNumber.searchParams.get('text'),draft + '\nPlease review & file.');
+  await close();
+  await page.setViewportSize({width:1440,height:1000});
+
   await page.getByRole('tab',{name:'Activity',exact:true}).click();await page.getByRole('button',{name:'Details',exact:true}).click();await dialog.getByRole('button',{name:'Void this record',exact:true}).click();await dialog.getByLabel('Reason for voiding').fill('Wrong bank account');await save('Void record');await page.locator('.money-badge').getByText('Voided',{exact:true}).waitFor();
   await page.getByRole('tab',{name:'Bills',exact:true}).click();assert.match(await bill.locator('td').nth(3).textContent(),/10,000.00/);
   // Invoice correction retains original; replacement can reuse its invoice number.
   await bill.getByRole('button',{name:'Pay / details',exact:true}).click();await dialog.getByRole('button',{name:'Void this record',exact:true}).click();await dialog.getByLabel('Reason for voiding').fill('Revised invoice');await save('Void record');await addBill('supplier','Fuel Supplier','INV-1','9000');
+  const voidedBill = bill.filter({has:page.getByText('Voided',{exact:true})});
+  await voidedBill.waitFor();
+  assert.equal(await voidedBill.getByRole('button',{name:/on WhatsApp/}).count(),0);
   const capture=process.env.SCREENSHOT_DIR;if(capture)await mkdir(capture,{recursive:true});
   for(const view of ['Payroll','Payables']){
     await page.setViewportSize({width:1440,height:1000});

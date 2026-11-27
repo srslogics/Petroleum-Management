@@ -163,8 +163,8 @@ function whatsappLink(label, message, digits = "") {
   return `<a class="secondary whatsapp-link" href="${safe(whatsappUrl(message, digits))}" target="_blank" rel="noopener noreferrer">${safe(label)}</a>`;
 }
 
-function openWhatsAppComposer(message = "") {
-  moneyDialog("Send with WhatsApp", `<form id="whatsapp-form" class="money-form">
+function openWhatsAppComposer(message = "", title = "Send with WhatsApp") {
+  moneyDialog(title, `<form id="whatsapp-form" class="money-form">
     <label>WhatsApp number (optional)<input name="recipient" type="tel" maxlength="24" placeholder="+91 …" autocomplete="off" aria-describedby="whatsapp-recipient-help"></label>
     <p id="whatsapp-recipient-help" class="money-form-hint">Include the country code, or leave this blank to choose a contact in WhatsApp.</p>
     <div><label for="whatsapp-message">Message</label><textarea id="whatsapp-message" name="message" rows="6" maxlength="2000">${safe(message)}</textarea></div>

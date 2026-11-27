@@ -8,7 +8,7 @@ const outgoingParty = row => row.payee || outgoingStaff(row.staff_id)?.name || o
 const outgoingText = (label,name,value='',required=true) => `<label>${label}<input name="${name}" value="${safe(value)}" maxlength="150" ${required?'required':''}></label>`;
 const outgoingAmount = (label,name,value='',zero=false) => numberField(label,name,{required:true,min:zero?0:0.01,value:value===''?'':(value/100).toFixed(2)});
 const outgoingNote = () => '<label>Note (optional)<textarea name="note" maxlength="500" rows="2"></textarea></label>';
-const outgoingButton = (action,id,label,style='text-button') => `<button type="button" class="${style}" data-action="${action}" data-id="${id}">${label}</button>`;
+const outgoingButton = (action,id,label,style='text-button',accessibleName='') => `<button type="button" class="${style}" data-action="${action}" data-id="${id}"${accessibleName ? ` aria-label="${safe(accessibleName)}"` : ''}>${label}</button>`;
 const outgoingStatus = row => row.voided_at ? moneyBadge('Voided') : row.balance===0 ? moneyBadge('Paid','positive') : row.overdue ? moneyBadge('Overdue','warning') : moneyBadge(row.paid?'Part paid':'Unpaid');
 
 function openOutgoings(page, afterRender) {
@@ -47,7 +47,27 @@ function outgoingTable(tab,entries) {
   let heads, body;
   if(tab==='salaries'||tab==='bills'){
     const salary=tab==='salaries';heads=[salary?'Staff / month':'Payee / bill','Due date',salary?'Earned':'Bill amount',salary?'Advance applied':'Paid','To pay','Status',''];
-    body=rows.map(r=>`<tr ${outgoingRowData(r,outgoingParty(r)+' '+(r.period||r.reference))}><th scope="row">${outgoingButton(salary?'salary-detail':'bill-detail',r.id,safe(outgoingParty(r)),'money-source-link')}<small>${safe(r.period||r.reference)}${!salary?' · '+safe(r.kind):''}</small><small class="outgoing-mobile-status">${r.voided_at?'Voided':r.balance===0?'Paid':r.overdue?'Overdue':r.paid?'Part paid':'Unpaid'}</small></th><td>${safe(r.due_date)}</td><td class="numeric">${money(r.amount)}</td><td class="numeric">${money(salary?r.advance_applied:r.paid)}</td><td class="numeric"><strong>${money(r.balance)}</strong></td><td>${outgoingStatus(r)}</td><td>${outgoingButton(salary?'salary-detail':'bill-detail',r.id,r.balance?'Pay / details':'Details')}</td></tr>`).join('');
+    body=rows.map(row=>{
+      const party=outgoingParty(row);
+      const reference=row.period||row.reference;
+      const detail=salary?'salary-detail':'bill-detail';
+      const shareLabel=!salary&&!row.voided_at ? `Share bill ${row.reference} for ${party} on WhatsApp` : '';
+      return `<tr ${outgoingRowData(row,party+' '+reference)}>
+        <th scope="row">
+          ${outgoingButton(detail,row.id,safe(party),'money-source-link')}
+          <small>${safe(reference)}${salary?'':' · '+safe(row.kind)}</small>
+          <small class="outgoing-mobile-status">${row.voided_at?'Voided':row.balance===0?'Paid':row.overdue?'Overdue':row.paid?'Part paid':'Unpaid'}</small>
+          ${shareLabel ? outgoingButton('bill-share',row.id,'WhatsApp','text-button bill-share-mobile',shareLabel) : ''}
+        </th>
+        <td>${safe(row.due_date)}</td><td class="numeric">${money(row.amount)}</td>
+        <td class="numeric">${money(salary?row.advance_applied:row.paid)}</td>
+        <td class="numeric"><strong>${money(row.balance)}</strong></td><td>${outgoingStatus(row)}</td>
+        <td><div class="outgoing-row-actions">
+          ${outgoingButton(detail,row.id,row.balance?'Pay / details':'Details')}
+          ${shareLabel ? outgoingButton('bill-share',row.id,'WhatsApp','text-button',shareLabel) : ''}
+        </div></td>
+      </tr>`;
+    }).join('');
   }else if(tab==='staff'||tab==='advances'){
     heads=['Staff','Role',tab==='staff'?'Monthly salary':'Advance balance','Status',''];
     body=rows.map(r=>`<tr ${outgoingRowData({...r,balance:r.advance_balance},r.name+' '+r.code)}><th scope="row">${outgoingButton('staff-edit',r.id,safe(r.name),'money-source-link')}<small>${safe(r.code)}</small></th><td>${safe(r.job_title||'—')}</td><td class="numeric"><strong>${money(tab==='staff'?r.monthly_salary:r.advance_balance)}</strong></td><td>${moneyBadge(r.active?'Active':'Inactive',r.active?'positive':'neutral')}</td><td>${tab==='staff'?outgoingButton('staff-edit',r.id,'Edit staff'):r.advance_balance?outgoingButton('advance-return',r.id,'Record return'):outgoingButton('advance-new',r.id,'Give advance')}</td></tr>`).join('');
@@ -83,6 +103,21 @@ function outgoingSalaryForm(){
   const form=dialog.querySelector('form');const update=()=>{const person=outgoingStaff(Number(form.elements.staff_id.value));document.querySelector('#out-advance-hint').textContent=`${money(person.advance_balance)} in outstanding advances. Apply only the amount you want to recover this month.`;form.elements.advance_applied.max=(person.advance_balance/100).toFixed(2);document.querySelector('#out-net').textContent='Salary to pay: '+money(Math.round((Number(form.elements.amount.value)-Number(form.elements.advance_applied.value))*100));};form.elements.staff_id.addEventListener('change',()=>{form.elements.amount.value=(outgoingStaff(Number(form.elements.staff_id.value)).monthly_salary/100).toFixed(2);form.elements.advance_applied.value='0.00';update();});form.addEventListener('input',update);update();
 }
 function outgoingBillForm(){outgoingForm('Add bill',`<label>Bill type<select name="kind"><option value="supplier">Supplier invoice</option><option value="other">Other bill</option></select></label>${outgoingText('Supplier / payee','payee')}${outgoingText('Invoice / bill reference','reference')}${outgoingAmount('Bill amount (₹)','amount')}<div class="money-form-grid">${businessDate('Bill date','bill_date',outgoingData.today)}${businessDate('Payment due date','due_date',outgoingData.today)}</div><label>Description<textarea name="note" rows="2" maxlength="500" required></textarea></label>`,'/payables/bills',{},'Add bill');}
+
+function shareOutgoingBill(bill) {
+  const message = [
+    session.station,
+    `Bill reference · ${bill.reference}`,
+    `Payee · ${bill.payee}`,
+    `Bill date · ${businessDay(bill.bill_date, 'medium')}`,
+    `Payment due · ${businessDay(bill.due_date, 'medium')}`,
+    `Bill amount · ${money(bill.amount)}`,
+    `Paid · ${money(bill.paid)}`,
+    `Balance due · ${money(bill.balance)}`,
+    bill.note ? `\n${bill.note}` : '',
+  ].filter(Boolean).join('\n');
+  openWhatsAppComposer(message, 'Share bill on WhatsApp');
+}
 function outgoingPayment(kind,source){
   const advance=kind==='advance'||kind==='advance_return';
   if(advance&&!outgoingData.staff.some(s=>s.active||kind==='advance_return'&&s.advance_balance>0)){moneyDialog('Add staff first','<p>Add an active staff member before recording an advance.</p>');return;}
@@ -92,7 +127,14 @@ function outgoingPayment(kind,source){
 }
 function outgoingDetail(kind,row){
   const entry=kind==='entry';const related=entry?[]:outgoingData.entries.filter(e=>e[kind==='salary'?'salary_id':'bill_id']===row.id);
-  moneyDialog(entry?outgoingLabels[row.kind]:kind==='salary'?'Salary details':'Bill details',`<div class="money-account-balance"><span>${safe(outgoingParty(row))} · ${safe(row.period||row.reference)}</span><strong>${money(entry?row.amount:row.balance)}</strong>${entry?moneyBadge(row.voided_at?'Voided':'Recorded'):outgoingStatus(row)}</div><dl class="money-entry-details">${(entry?[['Payment date',row.paid_on],['Method',row.method],['Reference',row.reference]]:[['Original amount',money(row.amount)],...(kind==='salary'?[['Advance recovered',money(row.advance_applied)],['Net salary',money(row.net)]]:[['Bill date',row.bill_date],['Bill type',row.kind]]),['Paid',money(row.paid)],['Payment due',row.due_date]]).concat([['Note',row.note||'—'],['Recorded at',timestamp(row.created_at)],['Recorded by',row.actor]]).map(([k,v])=>`<div><dt>${k}</dt><dd>${safe(v)}</dd></div>`).join('')}</dl>${row.voided_at?`<div class="money-void-note"><strong>Void reason</strong><p>${safe(row.void_reason)}</p><small>${safe(timestamp(row.voided_at))} · ${safe(row.void_actor)}</small></div>`:`<div class="outgoing-detail-actions">${!entry&&row.balance?outgoingButton(kind+'-pay',row.id,'Record payment','primary'):''}${outgoingButton(kind+'-void',row.id,'Void this record','text-button money-danger')}</div>`}${related.length?`<h3>Payment history</h3><ul class="outgoing-history">${related.map(e=>`<li>${outgoingButton('entry-detail',e.id,safe(e.reference))}<span>${money(e.amount)} · ${e.voided_at?'Voided':safe(e.paid_on)}</span></li>`).join('')}</ul>`:''}`,true);
+  const actions = `<div class="outgoing-detail-actions">
+    ${!entry&&row.balance ? outgoingButton(kind+'-pay',row.id,'Record payment','primary') : ''}
+    ${kind==='bill' ? outgoingButton('bill-share',row.id,'Share on WhatsApp','secondary') : ''}
+    ${outgoingButton(kind+'-void',row.id,'Void this record','text-button money-danger')}
+  </div>`;
+  moneyDialog(entry?outgoingLabels[row.kind]:kind==='salary'?'Salary details':'Bill details',`<div class="money-account-balance"><span>${safe(outgoingParty(row))} · ${safe(row.period||row.reference)}</span><strong>${money(entry?row.amount:row.balance)}</strong>${entry?moneyBadge(row.voided_at?'Voided':'Recorded'):outgoingStatus(row)}</div><dl class="money-entry-details">${(entry?[['Payment date',row.paid_on],['Method',row.method],['Reference',row.reference]]:[['Original amount',money(row.amount)],...(kind==='salary'?[['Advance recovered',money(row.advance_applied)],['Net salary',money(row.net)]]:[['Bill date',row.bill_date],['Bill type',row.kind]]),['Paid',money(row.paid)],['Payment due',row.due_date]]).concat([['Note',row.note||'—'],['Recorded at',timestamp(row.created_at)],['Recorded by',row.actor]]).map(([k,v])=>`<div><dt>${k}</dt><dd>${safe(v)}</dd></div>`).join('')}</dl>
+  ${row.voided_at?`<div class="money-void-note"><strong>Void reason</strong><p>${safe(row.void_reason)}</p><small>${safe(timestamp(row.voided_at))} · ${safe(row.void_actor)}</small></div>`:actions}
+  ${related.length?`<h3>Payment history</h3><ul class="outgoing-history">${related.map(e=>`<li>${outgoingButton('entry-detail',e.id,safe(e.reference))}<span>${money(e.amount)} · ${e.voided_at?'Voided':safe(e.paid_on)}</span></li>`).join('')}</ul>`:''}`,true);
   bindOutgoingActions(document.querySelector('#money-dialog'));
 }
 function bindOutgoingActions(scope=document){scope.querySelectorAll('[data-action]').forEach(button=>button.addEventListener('click',()=>{
@@ -101,5 +143,7 @@ function bindOutgoingActions(scope=document){scope.querySelectorAll('[data-actio
   if(action==='staff-new')return outgoingStaffForm();if(action==='staff-edit')return outgoingStaffForm(outgoingStaff(id));if(action==='salary-new')return outgoingSalaryForm();if(action==='bill-new')return outgoingBillForm();if(action==='advance-new')return outgoingPayment('advance',outgoingStaff(id));if(action==='advance-return')return outgoingPayment('advance_return',outgoingStaff(id));
   if(action==='help'){moneyDialog('How '+(outgoingPage==='payroll'?'Payroll':'Payables')+' works',`<div class="money-help-content">${outgoingPage==='payroll'?'<section><h3>Salaries and advances</h3><p>Add staff separately from manager sign-ins. Prepare one earned salary per staff member per month. Monthly salary is a starting amount; enter the actual salary earned.</p></section><section><h3>Recovering advances</h3><p>An advance stays outstanding until returned or applied to a salary. Apply advance when adding a salary to reduce the amount left to pay. No deductions or taxes are calculated automatically.</p></section>':'<section><h3>Supplier and other bills</h3><p>Add the amount owed, bill reference and due date. Record each payment to reduce the balance. Partial payments stay outstanding.</p></section>'}<section><h3>Recorded payments</h3><p>This is a record of payments you have already made. It does not transfer money or change shift cash, fuel sales or customer receipts.</p></section><section><h3>Correct a record</h3><p>Open a record and void it with a reason. Void linked payments before voiding a salary or bill. Reverse advance recovery or returns before voiding a used advance. Originals stay in history.</p></section></div>`);return;}
   const [kind,verb]=action.split('-'),row=(kind==='salary'?d.salaries:kind==='bill'?d.bills:d.entries).find(r=>r.id===id);
-  if(!row)return;if(verb==='detail')return outgoingDetail(kind,row);if(verb==='pay')return outgoingPayment(kind,row);if(verb==='void')return outgoingForm('Void record',`<p class="money-form-hint">The original remains in history. Its balance will be reversed.</p><label>Reason for voiding<textarea name="reason" rows="3" maxlength="500" required></textarea></label>`,`/outgoings/${kind}/${id}/void`,{},'Void record');
+  if(!row)return;
+  if(action==='bill-share'&&!row.voided_at)return shareOutgoingBill(row);
+  if(verb==='detail')return outgoingDetail(kind,row);if(verb==='pay')return outgoingPayment(kind,row);if(verb==='void')return outgoingForm('Void record',`<p class="money-form-hint">The original remains in history. Its balance will be reversed.</p><label>Reason for voiding<textarea name="reason" rows="3" maxlength="500" required></textarea></label>`,`/outgoings/${kind}/${id}/void`,{},'Void record');
 }));}
