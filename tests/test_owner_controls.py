@@ -205,9 +205,25 @@ class OwnerControlsTest(unittest.TestCase):
             self.assertEqual(sorted(pool.map(pay, ['RENT-1', 'RENT-2'])), [200, 409])
         self.assertEqual(self.state()['market_receivables'][0]['balance'], 25000)
 
+    def test_owner_contacts_persist_and_can_update_numbers(self):
+        route = '/api/owner/contacts'
+        contact = {'name': 'Fleet Supplies', 'phone': '90000 00001'}
+        self.call(route, contact)
+        self.call(route, {'name': ' fleet supplies ', 'phone': ''}, status=409)
+        self.call(route, {'name': 'Invalid number', 'phone': '+91 invalid'}, status=400)
+        item, = self.call(route)['contacts']
+        self.assertEqual(item['phone'], '+919000000001')
+        self.call(route, {'id': item['id'], 'phone': '+44 20 7946 0012'})
+        self.browser = Browser(create_app(self.database, env={}))
+        self.call('/api/owner/login', {'email': 'owner@demo.local', 'password': 'OwnerDemo123!'})
+        saved, = self.call(route)['contacts']
+        self.assertEqual(saved, item | {'phone': '+442079460012'})
+        self.call(route, {'id': item['id'], 'phone': ''})
+        self.assertEqual(self.call(route)['contacts'][0]['phone'], '')
+
     def test_upgrade_adds_control_tables_without_changing_existing_shifts(self):
         shift, _ = self.submit()
-        tables = ['market_receipts','market_receivables','manager_controls','tanks','customers','credit_allocations','repayments','record_voids','bank_records',
+        tables = ['station_contacts','market_receipts','market_receivables','manager_controls','tanks','customers','credit_allocations','repayments','record_voids','bank_records',
                   'corrections','shift_revisions','exception_acknowledgements']
         with closing(open_db(self.database)) as db, db:
             for table in tables:
@@ -295,6 +311,9 @@ class OwnerControlsTest(unittest.TestCase):
         self.call('/api/manager/business', status=404)
         self.call('/api/manager/repayments', {}, status=404)
         self.call('/api/manager/receivables', {}, status=404)
+        self.call('/api/manager/contacts', status=404)
+        self.call('/api/owner/contacts', {'name': 'Station One Contact', 'phone': '9000000001'})
+        contact, = self.call('/api/owner/contacts')['contacts']
         self.call('/api/manager/business/banking', status=404)
         self.call('/api/owner/receivables', {'kind': 'other', 'party': 'Station One Account',
                   'amount': '100', 'reference': 'ST-1', 'recorded_on': '2026-11-22'})
@@ -306,6 +325,8 @@ class OwnerControlsTest(unittest.TestCase):
             db.execute("UPDATE users SET station_id = 2 WHERE role = 'owner'")
         self.assertEqual(self.state()['customers'], [])
         self.assertEqual(self.state()['market_receivables'], [])
+        self.assertEqual(self.call('/api/owner/contacts')['contacts'], [])
+        self.call('/api/owner/contacts', {'id': contact['id'], 'phone': ''}, status=404)
         self.call('/api/owner/receivables/payments', {'receivable_id': receivable['id'], 'amount': '1',
                   'method': 'bank', 'reference': 'ST-2', 'paid_on': '2026-11-22'}, status=404)
         self.call(f"/api/owner/money-records/market-due/{receivable['id']}/void", {'reason': 'Other station'}, status=404)

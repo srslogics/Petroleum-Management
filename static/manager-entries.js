@@ -10,6 +10,9 @@ function entryRow(category) {
   const select = (label, field, choices) => `<label>${label}<select data-field="${field}">${choices.map(([value, text]) =>
     `<option value="${value}">${text}</option>`).join("")}</select></label>`;
   const text = (label, field, required = false) => `<label>${label}<input data-field="${field}" maxlength="150" ${required ? "required" : ""}></label>`;
+  const partyLabel = category === "deliveries" ? "Supplier / tanker" : category === "payments" ? "Customer / account" : "Paid to";
+  const partyField = role === "owner" ? contactNameField(partyLabel, "party", "", {entry: true, required: false})
+    : category === "payments" ? "" : text(partyLabel, "party");
   return `<fieldset class="manager-entry" data-entry="${category}"><legend>${{payments:"Payment",deliveries:"Fuel delivery",expenses:"Till expense"}[category]}</legend>
     <div class="field-grid">
       ${category === "payments" ? select("Payment method", "method", Object.entries(methodNames).filter(([key])=>role === "owner" || key !== "credit")) : ""}
@@ -17,7 +20,7 @@ function entryRow(category) {
       <label>${category === "deliveries" ? "Quantity (L)" : "Amount (₹)"}<input data-field="${category === "deliveries" ? "quantity" : "amount"}"
         type="number" inputmode="decimal" min="${category === "deliveries" ? "0.001" : "0.01"}" max="1000000000"
         step="${category === "deliveries" ? "0.001" : "0.01"}" required></label>
-      ${category === "payments" && role === "manager" ? "" : text(category === "deliveries" ? "Supplier / tanker" : category === "payments" ? "Customer / account" : "Paid to", "party")}
+      ${partyField}
       ${text(category === "deliveries" ? "Invoice / challan number" : "Receipt / transaction reference", "reference")}
       ${text(category === "expenses" ? "Expense description" : "Notes", "note", category === "expenses")}
     </div>
@@ -67,6 +70,7 @@ function bindManagerEntries(form, active) {
         return;
       }
       list.insertAdjacentHTML("beforeend", entryRow(add.dataset.addEntry));
+      if (role === "owner") bindContactFields(list.lastElementChild);
       list.lastElementChild.querySelector("input").focus();
       sync();
       form.dispatchEvent(new Event("input", {bubbles:true}));
