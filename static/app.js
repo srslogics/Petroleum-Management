@@ -78,20 +78,19 @@ function brand() {
 
 function authFrame(content) {
   const owner = role === "owner";
-  return `<div class="auth-page">
-    <div class="auth-frame">
-      <aside class="auth-brand-panel" aria-label="Tuljai Petroleum">
-        ${brand()}
-        <div class="auth-brand-copy">
-          <span class="auth-brand-line" aria-hidden="true"></span>
-          <p class="auth-brand-title">Fuel station<br>workspace</p>
-          <p class="auth-brand-detail">${owner
-            ? "Track sales, stock and the station’s finances."
-            : "Record readings, collections and deliveries."}</p>
-        </div>
-      </aside>
-      <div class="auth-content">${content}</div>
-    </div>
+  const panels = `<aside class="auth-brand-panel" aria-label="Tuljai Petroleum">
+      ${brand()}
+      <div class="auth-brand-copy">
+        <span class="auth-brand-line" aria-hidden="true"></span>
+        <p class="auth-brand-title">Fuel station<br>workspace</p>
+        <p class="auth-brand-detail">${owner
+          ? "Track sales, stock and the station’s finances."
+          : "Record readings, collections and deliveries."}</p>
+      </div>
+    </aside>
+    <div class="auth-content">${content}</div>`;
+  return `<div class="auth-page${owner ? " auth-page--owner" : ""}">
+    ${owner ? panels : `<div class="auth-frame">${panels}</div>`}
     <footer class="auth-footer">
       <a href="/${owner ? "manager" : "owner"}">${owner ? "Manager sign-in" : "Owner sign-in"}</a>
       <div id="auth-install"></div>

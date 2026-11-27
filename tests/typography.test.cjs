@@ -82,6 +82,39 @@ test('typography stays consistent across roles, reports, phone layouts and offli
   await page.goto(origin+'/owner');
   await page.getByRole('heading',{name:'Sign in',exact:true}).waitFor();
   await audit('owner-sign-in');
+  for (const [width,height] of [[1440,900],[390,844],[320,568],[844,390]]) {
+    await page.setViewportSize({width,height});
+    const layout = await page.locator('.auth-page--owner').evaluate(surface => {
+      const measure = selector => {
+        const {left,right,top,bottom} = surface.querySelector(selector).getBoundingClientRect();
+        return {left,right,top,bottom};
+      };
+      return {
+        brand:measure('.auth-brand-panel'), form:measure('.auth-content'), footer:measure('.auth-footer'),
+        card:surface.querySelector('.auth-frame') !== null,
+        hasHorizontalScroll:document.documentElement.scrollWidth > innerWidth + 1,
+      };
+    });
+    assert.equal(layout.card,false);
+    assert.equal(layout.hasHorizontalScroll,false);
+    assert.equal(layout.brand.left,0);
+    assert.equal(layout.brand.top,0);
+    assert.equal(layout.form.right,width);
+    if (width <= 680) {
+      assert.equal(layout.brand.right,width);
+      assert.equal(layout.form.left,0);
+      assert.equal(layout.form.top,layout.brand.bottom);
+      assert.equal(layout.footer.top,layout.form.bottom);
+      assert.ok(layout.footer.bottom >= height);
+    } else {
+      assert.equal(layout.form.left,layout.brand.right);
+      assert.equal(layout.form.top,0);
+      assert.equal(layout.footer.top,layout.form.bottom);
+      assert.equal(layout.brand.bottom,layout.footer.bottom);
+      assert.ok(layout.brand.bottom >= height);
+    }
+  }
+
   await post('manager/login',{email:'manager@demo.local',password:'ManagerDemo123!'});
   await post('manager/shift',{openings:{1:100,2:200}});
   await post('owner/login',{email:'owner@demo.local',password:'OwnerDemo123!'});
