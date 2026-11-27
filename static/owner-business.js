@@ -59,27 +59,50 @@ function downloadCustomerStatement(customer, today) {
   document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
+function currentShiftCard(active) {
+  return `<section class="card card-flow" aria-labelledby="current-shift-heading">
+    <header class="section-head">
+      <div><h2 id="current-shift-heading">Current open shift</h2>
+        ${active ? `<p>Shift #${active.id} · Opened by ${safe(active.opener)}</p>` : ''}
+      </div>
+      <button id="refresh-operations" class="secondary" type="button">Refresh status</button>
+    </header>
+    ${active ? `<dl class="shift-facts">
+      <div><dt>Status</dt><dd>${moneyBadge(active.overdue ? 'Overdue' : 'Open', active.overdue ? 'warning' : 'positive')}${active.overdue ? '<small>Open for 12 hours or more</small>' : ''}</dd></div>
+      <div><dt>Time open</dt><dd>${active.hours} hours</dd></div>
+      <div><dt>Opened</dt><dd><time datetime="${safe(active.opened_at)}">${timestamp(active.opened_at)}</time></dd></div>
+      <div><dt>Business date</dt><dd><time datetime="${safe(active.business_date)}">${businessDay(active.business_date, 'medium')}</time></dd></div>
+    </dl>
+    <div class="opening-meters"><h3>Opening readings</h3>
+      <dl class="meter-grid">${active.nozzles.map(item => `<div>
+        <dt><strong>${safe(item.code)}</strong> ${fuelTag(item.fuel)}</dt><dd>${volume(item.opening)}</dd>
+      </div>`).join('')}</dl>
+    </div>
+    <p class="quiet">Closing entries appear here after the manager submits the shift. Unsaved entries stay on the manager’s device.</p>`
+      : '<p class="inline-empty">No shift is currently open.</p>'}
+  </section>`;
+}
+
 function showOperations(data) {
-  const active = data.active;
-  shell(`${heading('Owner controls', 'Operations', 'Current shift, tank capacities and correction requests.')}
-    <section class="card"><h2>Current open shift</h2>${active ? `<p><strong>Shift #${active.id} · ${safe(active.opener)}</strong></p>
-      <p>Opened ${timestamp(active.opened_at)} · Business date ${safe(active.business_date)} · Open ${active.hours} hours</p>
-      ${active.overdue ? '<p class="notice">Overdue: this shift has been open for at least 12 hours.</p>' : ''}
-      <p>Opening readings: ${active.nozzles.map(item => safe(item.code) + ' ' + volume(item.opening)).join(' · ')}</p>
-      <small>Closing entries appear after submission. Unsaved entries remain on the manager’s device.</small>` : '<p>No shift is currently open.</p>'}
-      <button id="refresh-operations" class="secondary" type="button">Refresh status</button></section>
-    <section class="card"><h2>Tank capacities and low stock thresholds</h2><p>Enter the combined usable capacity for each fuel. Low stock warnings use the threshold you set, measured against calculated stock.</p>
-      ${fuelNames.map(fuel => `<form class="business-form" id="tank-${fuel}"><h3>${fuel}</h3><p>Current book stock ${volume(data.stock[fuel])}</p>
+  shell(`${heading('', 'Operations', 'Monitor the current shift, set stock alerts and follow up on corrections.')}
+    ${currentShiftCard(data.active)}
+    <section class="card card-flow">
+      <header class="section-head"><div><h2>Tank capacities and low stock thresholds</h2><p>Set a combined usable capacity and low stock threshold for each fuel.</p></div></header>
+      <div class="fuel-grid tank-grid">${fuelNames.map(fuel => `<form class="business-form tank-form" id="tank-${fuel}">
+        <div><h3>${fuelTag(fuel)}</h3><p class="quiet">Book stock <strong>${volume(data.stock[fuel])}</strong></p></div>
         ${numberField('Usable capacity (L)', 'capacity', {required:true, step:'0.001', min:0.001, value: data.tanks[fuel] ? data.tanks[fuel].capacity / 1000 : undefined})}
         ${numberField('Low stock warning at or below (L)', 'low_level', {required:true, step:'0.001', value: data.tanks[fuel] ? data.tanks[fuel].low_level / 1000 : undefined})}
-        ${errorbox}<button class="primary">Save ${fuel} tank</button></form>`).join('')}
+        ${errorbox}<button class="primary">Save ${fuel} tank</button></form>`).join('')}</div>
     </section>
-    <section class="card"><h2>Correction requests</h2><p>Request changes from a shift’s report. Manager responses appear here. Resolve only after checking the figures and recording what happened.</p>
-      ${data.corrections.length ? data.corrections.map(item => `<details class="business-record"><summary>Shift #${item.shift_id} · ${item.resolved_at ? 'Closed' : item.responded_at ? 'Response received' : 'Awaiting manager'}</summary>
-        <p>${safe(item.reason)}</p><small>Requested ${timestamp(item.requested_at)}</small>
-        ${item.response ? `<p><strong>Manager response</strong> ${safe(item.response)}</p>` : ''}
+    <section class="card card-flow">
+      <header class="section-head"><div><h2>Correction requests</h2><p>Requests sent from shift reports and the manager’s responses.</p></div></header>
+      ${data.corrections.length ? `<div class="record-list">${data.corrections.map(item => `<details class="business-record">
+        <summary><span><strong>Shift #${item.shift_id}</strong><small>Requested ${timestamp(item.requested_at)}</small></span>
+          ${moneyBadge(item.resolved_at ? 'Closed' : item.responded_at ? 'Response received' : 'Awaiting manager', item.resolved_at ? 'neutral' : item.responded_at ? 'positive' : 'warning')}</summary>
+        <div class="record-body">${requestDetails(item)}
         <button type="button" id="correction-shift-${item.id}" class="secondary">Open shift #${item.shift_id}</button>
-        ${item.resolved_at ? `<p><strong>Resolution</strong> ${safe(item.resolution)}</p>` : `<form id="resolve-${item.id}" class="business-form">${businessNote('Resolution / adjustment made', 'resolution', true, 1000)}${errorbox}<button class="primary">Close request</button></form>`}</details>`).join('') : '<p>No correction requests.</p>'}
+        ${item.resolved_at ? '' : `<form id="resolve-${item.id}" class="business-form">${businessNote('Resolution / adjustment made', 'resolution', true, 1000)}${errorbox}<button class="primary">Close request</button></form>`}</div>
+      </details>`).join('')}</div>` : '<p class="inline-empty">No correction requests.</p>'}
     </section>`, 'operations');
   listen('refresh-operations', () => openBusiness('operations'));
   fuelNames.forEach(fuel => saveBusinessForm('tank-' + fuel, '/tanks', {fuel}, 'operations'));
@@ -89,17 +112,32 @@ function showOperations(data) {
   });
 }
 
+function requestDetails(item) {
+  return `<dl class="record-notes">
+    <div><dt>Request</dt><dd>${safe(item.reason)}</dd></div>
+    ${item.response ? `<div><dt>Manager response</dt><dd>${safe(item.response)}</dd></div>` : ''}
+    ${item.resolved_at ? `<div><dt>Owner resolution</dt><dd>${safe(item.resolution)}</dd></div>` : ''}
+  </dl>`;
+}
+
 function showExceptions(data) {
-  shell(`${heading('Owner controls', 'Exception inbox', 'Outstanding issues across all business dates. Acknowledging records a follow-up note; it does not change the underlying figures.')}
-    <section class="card"><label>Show<select id="exception-filter"><option value="open">Needs attention</option><option value="all">All active exceptions</option></select></label>
-    <p>${data.exceptions.filter(item => !item.acknowledgement).length} need attention · ${data.exceptions.length} active exceptions</p>
-    ${data.exceptions.length ? data.exceptions.map((item, index) => `<details class="business-record exception-record" data-ack="${Boolean(item.acknowledgement)}" ${item.acknowledgement ? 'hidden' : ''}>
-      <summary>${safe(item.kind)} · ${safe(item.message)}</summary>
+  const pending = data.exceptions.filter(item => !item.acknowledgement).length;
+  shell(`${heading('', 'Exception inbox', 'Review station issues across all business dates and record your follow-up.')}
+    <section class="card card-flow">
+    <header class="section-head"><div><h2>Station exceptions</h2><p>${pending} need attention · ${data.exceptions.length} active</p></div>
+      <label class="compact-filter">Show<select id="exception-filter"><option value="open">Needs attention</option><option value="all">All active exceptions</option></select></label></header>
+    <div class="record-list">${data.exceptions.map((item, index) => `<details class="business-record exception-record" data-ack="${Boolean(item.acknowledgement)}" ${item.acknowledgement ? 'hidden' : ''}>
+      <summary><span><strong>${safe(item.kind)}</strong><small>${safe(item.message)}</small></span>
+        ${moneyBadge(item.acknowledgement ? 'Acknowledged' : 'Needs attention', item.acknowledgement ? 'neutral' : 'warning')}</summary>
+      <div class="record-body">
       ${item.shift_id ? `<button type="button" class="secondary" id="exception-shift-${index}">Open shift #${item.shift_id}</button>` : ''}
-      ${item.acknowledgement ? `<p><strong>Follow-up recorded</strong> ${safe(item.acknowledgement.note)}</p><small>${timestamp(item.acknowledgement.created_at)}</small>` : `<form id="ack-${index}" class="business-form">${businessNote('Follow-up / action taken', 'note', true)}${errorbox}<button class="primary">Acknowledge</button></form>`}
-      </details>`).join('') : '<p>No active exceptions.</p>'}</section>`, 'exceptions');
+      ${item.acknowledgement ? `<dl class="record-notes"><div><dt>Follow-up recorded</dt><dd>${safe(item.acknowledgement.note)}</dd></div></dl><small>${timestamp(item.acknowledgement.created_at)}</small>` : `<form id="ack-${index}" class="business-form">${businessNote('Follow-up / action taken', 'note', true)}<p class="quiet">Acknowledging adds a note to this exception. The recorded figures stay as entered.</p>${errorbox}<button class="primary">Acknowledge</button></form>`}
+      </div></details>`).join('')}</div>
+    <p id="exception-empty" class="inline-empty" role="status" ${pending ? 'hidden' : ''}>${data.exceptions.length ? 'No exceptions need attention.' : 'No active exceptions.'}</p></section>`, 'exceptions');
   listen('exception-filter', event => {
-    document.querySelectorAll('.exception-record').forEach(row => { row.hidden = event.target.value === 'open' && row.dataset.ack === 'true'; });
+    const showAll = event.target.value === 'all';
+    document.querySelectorAll('.exception-record').forEach(row => { row.hidden = !showAll && row.dataset.ack === 'true'; });
+    document.querySelector('#exception-empty').hidden = showAll ? data.exceptions.length > 0 : pending > 0;
   }, 'change');
   data.exceptions.forEach((item, index) => {
     if (item.shift_id) listen('exception-shift-' + index, async () => {
@@ -146,13 +184,27 @@ function openWhatsAppComposer(message = "") {
 
 function managerControls(manager) {
   const phone = whatsappNumber(manager.login_id);
-  return `<details class="business-record"><summary>${safe(manager.name)} · ${safe(manager.login_id)} · ${manager.disabled ? 'Inactive' : 'Active'}</summary>
-    ${phone ? whatsappLink("WhatsApp " + manager.name, "", phone) : ""}
-    <form id="edit-manager-${manager.id}" class="business-form"><label>Name<input name="name" value="${safe(manager.name)}" required maxlength="80"></label>
-      <label>Mobile number<input name="phone" type="tel" value="${safe(manager.login_id)}" required maxlength="24"></label>${errorbox}<button class="secondary">Save manager details</button></form>
-    <form id="reset-manager-${manager.id}" class="business-form"><label>New password<input name="password" type="password" required minlength="15" maxlength="200" autocomplete="new-password"></label>${errorbox}<button class="secondary">Reset password and sign out</button></form>
-    <form id="status-manager-${manager.id}" class="business-form"><p>${manager.disabled ? 'Enable sign-in for this manager.' : 'Deactivate sign-in and end all active sessions. Historical shifts are retained.'}</p>${errorbox}<button class="secondary">${manager.disabled ? 'Activate manager' : 'Deactivate manager'}</button></form>
-    <form id="revoke-manager-${manager.id}" class="business-form">${errorbox}<button class="secondary">Sign out all manager sessions</button></form></details>`;
+  return `<details class="business-record">
+    <summary><span><strong>${safe(manager.name)}</strong><small>${safe(manager.login_id)}</small></span>
+      ${moneyBadge(manager.disabled ? 'Inactive' : 'Active', manager.disabled ? 'neutral' : 'positive')}</summary>
+    <div class="record-body">
+      ${phone ? whatsappLink("WhatsApp " + manager.name, "", phone) : ""}
+      <form id="edit-manager-${manager.id}" class="business-form"><h3>Manager details</h3>
+        <div class="field-grid">
+          <label>Name<input name="name" value="${safe(manager.name)}" required maxlength="80"></label>
+          <label>Mobile number<input name="phone" type="tel" value="${safe(manager.login_id)}" required maxlength="24"></label>
+        </div>${errorbox}<button class="secondary">Save manager details</button></form>
+      <form id="reset-manager-${manager.id}" class="business-form"><h3>Password reset</h3>
+        <label>New password<input name="password" type="password" required minlength="15" maxlength="200" autocomplete="new-password"></label>
+        ${errorbox}<button class="secondary">Reset password and sign out</button></form>
+      <div class="record-actions"><h3>Account access</h3>
+        <p class="quiet">${manager.disabled ? 'This manager’s sign-in is disabled.' : 'Deactivation ends active sessions and keeps historical shifts.'}</p>
+        <div class="workspace-actions">
+          <form id="status-manager-${manager.id}" class="business-form">${errorbox}<button class="secondary">${manager.disabled ? 'Activate manager' : 'Deactivate manager'}</button></form>
+          <form id="revoke-manager-${manager.id}" class="business-form">${errorbox}<button class="secondary">Sign out all manager sessions</button></form>
+        </div>
+      </div>
+    </div></details>`;
 }
 
 function bindManagerControls(managers) {
@@ -168,12 +220,24 @@ function bindManagerControls(managers) {
 }
 
 function correctionPanel(shift) {
-  return `<section class="card"><h2>Corrections and clarification</h2><p>The original report is retained when corrected. Figures can be corrected only before a later shift, bank reconciliation or customer repayment depends on them.</p>
+  const requests = shift.corrections || [];
+  const revisions = shift.revisions || [];
+  return `<section class="card card-flow">
+    <header class="section-head"><div><h2>Corrections and clarification</h2>
+      <p>Corrections retain the original report and are available until another shift, bank record or repayment depends on it.</p></div></header>
     <button type="button" id="correct-report" class="secondary">Correct report figures</button>
-    <form id="request-correction" class="business-form">${businessNote('Ask the manager to clarify or correct', 'reason', true)}${errorbox}<button class="secondary">Send correction request</button></form>
-    ${(shift.corrections || []).map(item => `<p><strong>${item.resolved_at ? 'Closed' : 'Open'} request</strong> · ${safe(item.reason)}${item.response ? '<br>Manager: ' + safe(item.response) : ''}${item.resolution ? '<br>Resolution: ' + safe(item.resolution) : ''}</p>`).join('')}
-    ${(shift.revisions || []).map(item => `<details class="business-record"><summary>Correction by ${safe(item.actor)} · ${timestamp(item.created_at)}</summary><p>${safe(item.reason)}</p>
-      ${revisionComparison(item)}</details>`).join('')}</section>`;
+    <form id="request-correction" class="business-form record-actions"><h3>Request clarification</h3>
+      ${businessNote('Ask the manager to clarify or correct', 'reason', true)}${errorbox}<button class="secondary">Send correction request</button></form>
+    ${requests.length || revisions.length ? `<div class="record-list">
+      ${requests.map(item => `<article class="business-record">
+        <header class="section-head record-heading"><h3>Correction request</h3>${moneyBadge(item.resolved_at ? 'Closed' : 'Open', item.resolved_at ? 'neutral' : 'warning')}</header>
+        <div class="record-body">${requestDetails(item)}</div>
+      </article>`).join('')}
+      ${revisions.map(item => `<details class="business-record">
+        <summary><span><strong>Correction by ${safe(item.actor)}</strong><small>${timestamp(item.created_at)}</small></span></summary>
+        <div class="record-body"><p>${safe(item.reason)}</p>${revisionComparison(item)}</div>
+      </details>`).join('')}
+    </div>` : ''}</section>`;
 }
 
 function revisionComparison(item) {
@@ -223,10 +287,15 @@ function fillCorrectionForm(form, shift) {
 
 async function openManagerRequests() {
   const requests = await api('/corrections');
-  shell(`${heading('', 'Owner requests', 'Respond with the correct figures and explanation. The owner applies and records any report correction.')}
-    <section class="card">${requests.length ? requests.map(item => `<article class="business-record"><h2>Shift #${item.shift_id} · ${item.resolved_at ? 'Closed' : 'Open'}</h2><p>${safe(item.reason)}</p><small>${timestamp(item.requested_at)} · ${safe(item.requester)}</small>
-      ${item.response ? `<p><strong>Your station’s response</strong> ${safe(item.response)}</p>` : ''}
-      ${item.resolved_at ? `<p><strong>Owner resolution</strong> ${safe(item.resolution)}</p>` : !item.responded_at ? `<form id="respond-${item.id}" class="business-form">${businessNote('Correct figures / explanation', 'response', true, 1000)}${errorbox}<button class="primary">Send response</button></form>` : '<p>Awaiting owner resolution.</p>'}</article>`).join('') : '<p>No requests from the owner.</p>'}</section>`, 'requests');
+  shell(`${heading('', 'Owner requests', 'Send the correct figures and a short explanation so the owner can update the report.')}
+    <div class="stack request-list">${requests.length ? requests.map(item => `<article class="card card-flow">
+      <header class="section-head"><div><h2>Shift #${item.shift_id}</h2><p>${safe(item.requester)} · ${timestamp(item.requested_at)}</p></div>
+        ${moneyBadge(item.resolved_at ? 'Closed' : item.responded_at ? 'Awaiting owner' : 'Needs response', item.resolved_at ? 'neutral' : item.responded_at ? 'positive' : 'warning')}</header>
+      ${requestDetails(item)}
+      ${!item.resolved_at && !item.responded_at ? `<form id="respond-${item.id}" class="business-form">${businessNote('Correct figures / explanation', 'response', true, 1000)}${errorbox}<button class="primary">Send response</button></form>` : ''}
+    </article>`).join('') : `<section class="card empty-card">
+      ${navigationIcon('requests')}<div><h2>No requests from the owner</h2><p>Requests for shift details will appear here.</p></div>
+    </section>`}</div>`, 'requests');
   requests.forEach(item => { if (!item.resolved_at && !item.responded_at) bindForm('respond-' + item.id, async form => {
     await api('/corrections/' + item.id + '/respond', fields(form)); await openManagerRequests();
   }); });

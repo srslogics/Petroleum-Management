@@ -86,8 +86,6 @@ input::placeholder, textarea::placeholder { font-weight: var(--weight-regular); 
 .business-record > summary { font-size: var(--text-small); font-weight: var(--weight-semibold); }
 .business-record p { font-size: var(--text-body); }
 .business-record small, .shift-table small { font-size: var(--text-meta); }
-.business-form > h3 { margin-top: .25rem; }
-.business-form > label + label { margin-top: 0; }
 .card > label + label { margin-top: .875rem; }
 .shift-empty > strong { font-size: var(--text-small); }
 .form-error { font-size: var(--text-small); font-weight: var(--weight-medium); }

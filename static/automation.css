@@ -22,6 +22,8 @@
 #auto-import-preview { max-height:45dvh; overflow:auto; }
 #auto-import-preview table { min-width:360px; }
 @media(max-width:600px) {
+ .auto-tabs { flex-wrap:wrap; justify-content:flex-start; gap:0 14px; overflow:visible; }
+ .auto-tabs button { padding:10px 0; }
  .auto-intro { padding:0 16px 16px; }
  .auto-alerts,.auto-report { padding:0 16px 16px; }
  .auto-table table { min-width:560px; }

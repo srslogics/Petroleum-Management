@@ -138,9 +138,33 @@ test('owner controls work through desktop and mobile screens', async t => {
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(await page.getByRole('heading',{name:'Money',exact:true}).isVisible(), true);
   await page.getByRole('button',{name:'Overview',exact:true}).click();
+  await page.route('**/api/owner/business/operations', async route => {
+    const response = await route.fetch();
+    const snapshot = await response.json();
+    const openedAt = new Date(Date.now() - 96.6 * 60 * 60 * 1000).toISOString();
+    const businessDate = new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date(openedAt));
+    await route.fulfill({response, json:{...snapshot, active:{
+      ...snapshot.active, opened_at:openedAt, business_date:businessDate, hours:96.6, overdue:true,
+    }}});
+  }, {times:1});
   await page.getByRole('button',{name:'View operations',exact:true}).click();
-  await page.getByRole('heading',{name:'Current open shift'}).waitFor();
-  assert.match(await page.locator('main').textContent(),/Asha Patil/);
+  const currentShift = page.getByRole('region',{name:'Current open shift'});
+  await currentShift.getByText('Overdue',{exact:true}).waitFor();
+  await currentShift.getByText('96.6 hours',{exact:true}).waitFor();
+  await currentShift.getByText('Opened by Asha Patil',{exact:false}).waitFor();
+  await currentShift.getByText('100 L',{exact:true}).waitFor();
+  await currentShift.getByText('200 L',{exact:true}).waitFor();
+  const operationCaptures = process.env.OWNER_SCREENSHOT_DIR;
+  if (operationCaptures) await mkdir(operationCaptures,{recursive:true});
+  for (const [width,columns] of [[1440,4],[390,2],[320,2]]) {
+    await page.setViewportSize({width,height:900});
+    assert.equal(await currentShift.locator('.shift-facts').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length),columns);
+    assert.ok(await currentShift.evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+    if (operationCaptures) await page.screenshot({path:path.join(operationCaptures,`owner-open-shift-${width}.png`),fullPage:true});
+  }
+  await page.setViewportSize({width:1440,height:1000});
+  await currentShift.getByRole('button',{name:'Refresh status'}).click();
+  await currentShift.getByText('Open',{exact:true}).waitFor();
   const tank = page.locator('#tank-Petrol');
   await tank.getByLabel('Usable capacity (L)').fill('10000');
   await tank.getByLabel('Low stock warning at or below (L)').fill('8000');
@@ -174,7 +198,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   await request.locator('summary').click();
   await request.getByLabel('Resolution / adjustment made').fill('Corrected cash after recount');
   await request.getByRole('button',{name:'Close request',exact:true}).click();
-  await page.getByText('Shift #1 · Closed',{exact:false}).waitFor();
+  await request.locator('summary').getByText('Closed',{exact:true}).waitFor();
 
   await post('manager/shift',{openings:{}});
   await post('owner/shifts/2/submit',{closings:{1:111,2:211},collections:{credit:50},counted:0});
@@ -263,7 +287,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   const account = page.locator('.business-record').filter({has:page.locator('summary',{hasText:'Asha Patil'})});
   await account.locator('summary').click();
   await account.getByRole('button',{name:'Deactivate manager',exact:true}).click();
-  await page.getByText('Asha Patil · manager@demo.local · Inactive',{exact:false}).waitFor();
+  await account.locator('summary').getByText('Inactive',{exact:true}).waitFor();
   assert.equal((await context.request.get(origin + '/api/manager/shift')).status(),401);
 
   await page.setViewportSize({width:390,height:844});
