@@ -151,6 +151,23 @@ CREATE TABLE IF NOT EXISTS exception_acknowledgements (
 );
 CREATE INDEX IF NOT EXISTS repayments_by_station ON repayments(station_id, customer_key);
 CREATE INDEX IF NOT EXISTS bank_records_by_source ON bank_records(station_id, source, method);
+CREATE TABLE IF NOT EXISTS market_receivables (
+    id INTEGER PRIMARY KEY, station_id INTEGER NOT NULL REFERENCES stations(id),
+    kind TEXT NOT NULL, party TEXT NOT NULL, party_key TEXT NOT NULL,
+    reference TEXT NOT NULL, reference_key TEXT NOT NULL, amount INTEGER NOT NULL,
+    recorded_on TEXT NOT NULL, due_date TEXT NOT NULL, note TEXT NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS market_receivables_by_reference ON market_receivables(station_id, party_key, reference_key);
+CREATE TABLE IF NOT EXISTS market_receipts (
+    id INTEGER PRIMARY KEY, station_id INTEGER NOT NULL REFERENCES stations(id),
+    receivable_id INTEGER NOT NULL REFERENCES market_receivables(id),
+    amount INTEGER NOT NULL, method TEXT NOT NULL, paid_on TEXT NOT NULL,
+    reference TEXT NOT NULL, reference_key TEXT NOT NULL, note TEXT NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL,
+    UNIQUE(station_id, reference_key)
+);
+CREATE INDEX IF NOT EXISTS market_receipts_by_receivable ON market_receipts(station_id, receivable_id);
 CREATE INDEX IF NOT EXISTS corrections_by_station ON corrections(station_id, shift_id);
 CREATE INDEX IF NOT EXISTS revisions_by_station ON shift_revisions(station_id, shift_id);
 CREATE TABLE IF NOT EXISTS reviews (
@@ -695,7 +712,8 @@ def owner_state(db, sid, selected):
             "opening_stock_confirmed": bool(stock_confirmation or any(row["opening_stock"] for row in fuels)),
             "business": {"active": business["active"], "tanks": business["tanks"],
                          "exceptions_count": sum(not issue["acknowledgement"] for issue in business["exceptions"]),
-                         "customer_balance": business["unallocated_credit"] + sum(c["balance"] for c in business["customers"])}}
+                         "customer_balance": business["unallocated_credit"] + sum(c["balance"] for c in business["customers"]),
+                         "market_balance": sum(item["balance"] for item in business["market_receivables"])}}
 
 
 def daily_owner_report(db, sid, selected, *, in_write=False):
@@ -899,6 +917,8 @@ def business_queries(sid):
         ("SELECT * FROM corrections WHERE station_id = ? ORDER BY id DESC", (sid,)),
         ("SELECT * FROM credit_allocations WHERE station_id = ? ORDER BY id", (sid,)),
         ("SELECT v.*, u.name AS actor FROM record_voids v JOIN users u ON u.id = v.user_id WHERE v.station_id = ?", (sid,)),
+        ("SELECT r.*, u.name AS actor FROM market_receivables r JOIN users u ON u.id = r.user_id WHERE r.station_id = ? ORDER BY r.id DESC", (sid,)),
+        ("SELECT r.*, u.name AS actor FROM market_receipts r JOIN users u ON u.id = r.user_id WHERE r.station_id = ? ORDER BY r.id DESC", (sid,)),
     ]
 
 
@@ -906,7 +926,7 @@ def business_state(db, sid, *, in_write=False, results=None):
     if results is None:
         queries = business_queries(sid)
         results = ([list(rows) for rows in execute_many(db, queries)] if in_write else read_snapshot(db, queries))
-    shifts, configs, repayments, bank, tanks, reviews, acks, fuels, corrections, allocations, voids = results
+    shifts, configs, repayments, bank, tanks, reviews, acks, fuels, corrections, allocations, voids, market, market_receipts = results
     void_lookup = {(row["record_type"], row["record_id"]): dict(row) for row in voids}
     repayment_history = [dict(row) | {"void": void_lookup.get(("repayment", row["id"]))} for row in repayments]
     bank_history = [dict(row) | {"void": void_lookup.get(("bank", row["id"]))} for row in bank]
@@ -990,10 +1010,27 @@ def business_state(db, sid, *, in_write=False, results=None):
                                      "reference": row["reference"], "note": row["note"], "actor": row["actor"]})
         if row["method"] == "cash":
             receivable(f"repayment:{row['id']}", "cash", row["amount"], f"Cash repayment · {item['name']} · {row['paid_on']}")
+    today = now()[:10]
+    market_by_id = {row["id"]: dict(row) | {"received": 0, "void": void_lookup.get(("market-due", row["id"]))} for row in market}
+    market_history = [dict(row) | {"void": void_lookup.get(("market-receipt", row["id"]))} for row in market_receipts]
+    for row in market_history:
+        item = market_by_id[row["receivable_id"]]
+        if row["void"]:
+            continue
+        item["received"] += row["amount"]
+        if row["method"] == "cash":
+            receivable(f"market-receipt:{row['id']}", "cash", row["amount"], f"Cash received · {item['party']} · {row['paid_on']}")
+    for item in market_by_id.values():
+        item["balance"] = 0 if item["void"] else item["amount"] - item["received"]
+        item["overdue"] = bool(item["balance"] > 0 and item["due_date"] and item["due_date"] < today)
+        if item["overdue"]:
+            issue(f"market-due:{item['id']}", "Overdue receivable",
+                  f"{item['party']} · {item['reference']}: ₹{item['balance'] / 100:,.2f} due since {item['due_date']}.",
+                  f"{item['balance']}:{item['due_date']}")
     for item in customers.values():
         item["balance"] = item["sales"] - item["repaid"]
         item["transactions"].sort(key=lambda entry: entry["date"])
-        item["overdue"] = bool(item["balance"] > 0 and item["due_date"] and item["due_date"] < now()[:10])
+        item["overdue"] = bool(item["balance"] > 0 and item["due_date"] and item["due_date"] < today)
         if item["overdue"]:
             issue("credit:" + item["customer_key"], "Overdue customer", f"{item['name']}: ₹{item['balance'] / 100:,.2f} due since {item['due_date']}.", f"{item['balance']}:{item['due_date']}")
     for row in tanks:
@@ -1018,7 +1055,7 @@ def business_state(db, sid, *, in_write=False, results=None):
             "unallocated_credit": unallocated, "unallocated_shifts": unallocated_shifts, "settlements": settlements, "bank_records": bank_history,
             "repayments": repayment_history, "tanks": {row["fuel"]: dict(row) for row in tanks},
             "stock": stock, "exceptions": exceptions, "corrections": [dict(row) for row in corrections],
-            "today": now()[:10]}
+            "market_receivables": list(market_by_id.values()), "market_receipts": market_history, "today": today}
 
 
 def operations_state(db, sid):
@@ -1048,20 +1085,76 @@ def owner_control_route(db, user, method, route, body):
     credit_match = re.fullmatch(r"/shift-credit(?:/([0-9]{1,18}))?", route)
     if method == "POST" and credit_match:
         return save_shift_credit(db, user, body, int(credit_match[1]) if credit_match[1] else None)
-    void_match = re.fullmatch(r"/money-records/(repayment|bank)/([0-9]{1,18})/void", route)
+    void_match = re.fullmatch(r"/money-records/(repayment|bank|market-due|market-receipt)/([0-9]{1,18})/void", route)
     if method == "POST" and void_match:
         kind, record_id = void_match[1], int(void_match[2])
         reason = required_note(body.get("reason"), "the reason for voiding this record", 500)
         with transaction(db, immediate=True):
             state = business_state(db, sid, in_write=True)
-            target = next((row for row in state["repayments" if kind == "repayment" else "bank_records"] if row["id"] == record_id), None)
+            group = {"repayment": "repayments", "bank": "bank_records",
+                     "market-due": "market_receivables", "market-receipt": "market_receipts"}[kind]
+            target = next((row for row in state[group] if row["id"] == record_id), None)
             if not target:
                 fail("Money record not found.", 404)
             if target["void"]:
                 fail("This record is already void.", 409)
-            if kind == "repayment" and any(row["source"] == f"repayment:{record_id}" and not row["void"] for row in state["bank_records"]):
-                fail("Void the linked cash deposit before voiding this repayment.", 409)
+            if kind in ("repayment", "market-receipt") and any(row["source"] == f"{kind}:{record_id}" and not row["void"] for row in state["bank_records"]):
+                fail("Void the linked cash deposit before voiding this payment.", 409)
+            if kind == "market-due" and target["received"]:
+                fail("Void the linked payments before voiding this receivable.", 409)
             db.execute("INSERT INTO record_voids VALUES (?, ?, ?, ?, ?, ?)", (sid, kind, record_id, reason, user["id"], now()))
+        return {"ok": True}
+    if method == "POST" and route in ("/receivables", "/receivables/payments"):
+        amount = number(body.get("amount"), 2, "amount")
+        if amount <= 0:
+            fail("Amount must be greater than zero.")
+        reference = required_note(body.get("reference"), "a reference", 150)
+        message = note(body.get("note", ""), "a description", 500)
+        created = now()
+        with transaction(db, immediate=True):
+            try:
+                if route == "/receivables":
+                    kind = body.get("kind")
+                    if kind not in ("invoice", "supplier", "loan", "reimbursement", "opening", "other"):
+                        fail("Choose a receivable type.")
+                    party = required_note(body.get("party"), "the person or company that owes you", 150)
+                    recorded = business_date(body.get("recorded_on"), "the date owed")
+                    due = business_date(body["due_date"], "the due date") if body.get("due_date") else ""
+                    if recorded > created[:10] or due and due < recorded:
+                        fail("Enter a date owed up to today and a due date on or after it.")
+                    existing = db.execute("""SELECT 1 FROM market_receivables r WHERE r.station_id = ?
+                        AND r.party_key = ? AND r.reference_key = ? AND NOT EXISTS (
+                            SELECT 1 FROM record_voids v WHERE v.station_id = r.station_id
+                            AND v.record_type = 'market-due' AND v.record_id = r.id
+                        )""", (sid, party.casefold(), reference.casefold())).fetchone()
+                    if existing:
+                        fail("This receivable reference has already been recorded for this party.", 409)
+                    db.execute("""INSERT INTO market_receivables(station_id, kind, party, party_key, reference,
+                        reference_key, amount, recorded_on, due_date, note, user_id, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (sid, kind, party, party.casefold(), reference, reference.casefold(), amount, recorded, due, message, user["id"], created))
+                else:
+                    ident = body.get("receivable_id")
+                    if type(ident) is not int or not 0 < ident < 10**18:
+                        fail("Choose a valid receivable.")
+                    state = business_state(db, sid, in_write=True)
+                    target = next((item for item in state["market_receivables"] if item["id"] == ident), None)
+                    if target is None:
+                        fail("Receivable not found.", 404)
+                    if target["void"] or amount > target["balance"]:
+                        fail("Payment exceeds the remaining balance.", 409)
+                    if body.get("method") not in ("bank", "cash"):
+                        fail("Choose cash or a confirmed bank receipt.")
+                    paid_on = business_date(body.get("paid_on"), "the receipt date")
+                    if not target["recorded_on"] <= paid_on <= created[:10]:
+                        fail("Enter a receipt date between the date owed and today.")
+                    if any(row["reference"].casefold() == reference.casefold() for row in state["repayments"]):
+                        fail("This receipt reference has already been recorded.", 409)
+                    db.execute("""INSERT INTO market_receipts(station_id, receivable_id, amount, method, paid_on,
+                        reference, reference_key, note, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (sid, ident, amount, body["method"], paid_on, reference, reference.casefold(), message, user["id"], created))
+            except sqlite3.IntegrityError:
+                fail("This reference has already been recorded.", 409)
         return {"ok": True}
     match = re.fullmatch(r"/managers/([0-9]{1,18})", route)
     if method == "POST" and match:
@@ -1137,6 +1230,8 @@ def owner_control_route(db, user, method, route, body):
                 reference = required_note(body.get("reference"), "a unique bank or receipt reference", 150)
                 message = note(body.get("note", ""), "a note", 500)
                 if route == "/repayments":
+                    if any(row["reference"].casefold() == reference.casefold() for row in state["market_receipts"]):
+                        fail("This receipt reference has already been recorded.", 409)
                     key = note(body.get("customer_key"), "a customer", 150)
                     customer = next((item for item in state["customers"] if item["customer_key"] == key), None)
                     if customer is None:
@@ -1413,11 +1508,15 @@ class Request:
             if method == "GET" and route == "/business/exceptions":
                 state = business_state(db, user["station_id"])
                 return {key: state[key] for key in ("active", "exceptions")}
+            if method == "GET" and route == "/business/banking":
+                state = business_state(db, user["station_id"])
+                return {key: state[key] for key in ("settlements", "bank_records", "today")}
             if method == "GET" and route == "/business/money":
                 sid = user["station_id"]
                 *rows, pending = read_snapshot(db, [*business_queries(sid), pending_credit_query(sid)])
                 state = business_state(db, sid, results=rows)
-                keys = ("active", "customers", "unallocated_credit", "unallocated_shifts", "settlements", "bank_records", "repayments", "today")
+                keys = ("active", "customers", "unallocated_credit", "unallocated_shifts", "settlements", "bank_records", "repayments",
+                        "market_receivables", "market_receipts", "today")
                 return {key: state[key] for key in keys} | {"pending_credits": list(map(dict, pending))}
             control = owner_control_route(db, user, method, route, data)
             if control is not None:

@@ -2,7 +2,7 @@
 
 function businessOverview(data) {
   const count = data.exceptions_count;
-  const balance = data.customer_balance;
+  const balance = data.customer_balance + data.market_balance;
   return `<section class="owner-control-summary" aria-label="Current operations and balances">
     <button id="overview-operations" type="button" class="overview-action" aria-label="View operations">
       <span class="action-label">${navigationIcon('operations')} Current shift</span>
@@ -13,9 +13,9 @@ function businessOverview(data) {
       <span class="action-label">${navigationIcon('exceptions')} Exceptions</span><strong>${count ? count + ' to check' : 'All clear'}</strong>
       <span class="action-detail">${count ? 'All dates · Open the inbox' : 'All dates · No open issues'}<span aria-hidden="true">↗</span></span>
     </button>
-    <button id="overview-money" type="button" class="overview-action" aria-label="Customer credit ${money(balance)}">
-      <span class="action-label">${navigationIcon('money')} Customer outstanding</span><strong>${money(balance)}</strong>
-      <span class="action-detail">All dates · View credit ledger<span aria-hidden="true">↗</span></span>
+    <button id="overview-money" type="button" class="overview-action" aria-label="Receivables ${money(balance)}">
+      <span class="action-label">${navigationIcon('money')} Receivables</span><strong>${money(balance)}</strong>
+      <span class="action-detail">All dates · View amounts owed<span aria-hidden="true">↗</span></span>
     </button>
   </section>`;
 }
@@ -29,7 +29,7 @@ const businessNote = (label = 'Note', name = 'note', required = false, limit = 5
 const businessDate = (label, name, value, required = true) => `<label>${label}<input type="date" name="${name}" value="${safe(value)}" ${required ? 'required' : ''}></label>`;
 
 function openBusiness(view = 'operations', afterRender) {
-  const render = {money: showMoney, exceptions: showExceptions, operations: showOperations}[view];
+  const render = {money: showMoney, banking: data => showMoney(data, true), exceptions: showExceptions, operations: showOperations}[view];
   return loadOwnerView('/business/' + view, data => {
     render(data);
     afterRender?.(data);

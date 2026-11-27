@@ -173,13 +173,13 @@ Inter Variable 5.3.0 is bundled in `static/fonts` under the adjacent SIL Open Fo
 
 `npm test` checks actual font loading, headings, inputs, buttons, tables, small text, overflow and offline typography across owner and manager screens at 1440px, 1024px, 390px and 320px widths.
 
-### Money workspace
+### Receivables and Banking
 
-Money separates work into **Customers**, **Banking** and **Activity**. The summary cards show customer dues, pending UPI/card receipts, cash awaiting deposit and customer payments received this month. Unassigned credit appears only when an allocation is needed.
+**Receivables** shows the total owed to the station, split into fuel credit and other dues. Existing customer accounts, statements and credit allocation are under **Fuel credit**. Use **Add receivable** for unpaid invoices, supplier refunds, loans or advances to recover, reimbursements, opening balances and other amounts owed. Open a receivable to record partial or full payments. Due dates feed the overdue total and the exception inbox.
 
-Search or filter the customer list, open an account for its statement, or choose **Record payment**. **Add customer**, payments, credit assignment and bank receipts open focused dialogs instead of showing every form at once. On phones, customer balances and pending bank amounts stay visible; tap a customer or banking source for its details and actions.
+**Banking** lives under **Station operations**. Use it to confirm UPI and card settlements and reconcile cash deposits. Cash received against a receivable appears as a pending deposit until it is banked.
 
-Banking filters pending/completed receipts and payment methods. Activity retains the money trail and provides the audited void workflow. **How this works** (or **Money help** on phones) contains accounting guidance outside the main working lists.
+**Activity** keeps a history in each workspace. To correct an entry, void it with a reason and enter a replacement. Void linked deposits before their cash payments and linked payments before the underlying receivable.
 
 ### Payroll and Payables
 

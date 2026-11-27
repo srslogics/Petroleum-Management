@@ -139,9 +139,75 @@ class OwnerControlsTest(unittest.TestCase):
         self.assertTrue(self.state()['repayments'][0]['void'])
         self.assertFalse(any(row['source'].startswith('repayment:') for row in self.state()['settlements']))
 
+    def test_receivables_payments_deposits_and_voids(self):
+        self.submit()
+        report = self.call('/api/owner/daily-report')
+        route = '/api/owner/receivables'
+        due = {'kind': 'supplier', 'party': 'Fuel Supply', 'reference': 'REFUND-1',
+               'amount': '5000', 'recorded_on': '2026-11-19', 'due_date': '2026-11-21'}
+        self.call(route, due)
+        self.call(route, due | {'party': 'fuel supply', 'reference': 'refund-1'}, status=409)
+        self.call(route, due | {'reference': 'REFUND-2', 'due_date': '2026-11-18'}, status=400)
+        item, = self.state()['market_receivables']
+        self.assertTrue(item['overdue'])
+        self.assertTrue(any(row['kind'] == 'Overdue receivable' for row in self.state()['exceptions']))
+        self.assertEqual(self.call('/api/owner/dashboard')['business']['market_balance'], 500000)
+
+        payment = {'receivable_id': item['id'], 'amount': '2000', 'method': 'cash',
+                   'reference': 'CASH-REFUND', 'paid_on': '2026-11-22'}
+        self.call(route + '/payments', payment)
+        self.call(route + '/payments', payment, status=409)
+        self.call(route + '/payments', payment | {'reference': 'TOO-MUCH', 'amount': '3000.01'}, status=409)
+        self.call(route + '/payments', payment | {'reference': 'TOO-EARLY', 'paid_on': '2026-11-18'}, status=400)
+        self.call('/api/owner/repayments', {'customer_key': 'fleet a', 'amount': '1', 'method': 'bank',
+                  'reference': 'cash-refund', 'paid_on': payment['paid_on']}, status=409)
+        self.assertEqual(self.state()['market_receivables'][0]['balance'], 300000)
+
+        receipt, = self.state()['market_receipts']
+        source = f"market-receipt:{receipt['id']}"
+        banking = self.call('/api/owner/business/banking')
+        cash = next(row for row in banking['settlements'] if row['source'] == source)
+        self.assertEqual(cash['remaining'], 200000)
+        self.call('/api/owner/bank-records', {'source': source, 'method': 'cash', 'amount': '2000',
+                  'bank_date': '2026-11-22', 'reference': 'BANK-DEPOSIT-1'})
+        self.call(route + '/payments', payment | {'reference': 'BANK-REFUND', 'method': 'bank', 'amount': '3000'})
+        self.assertEqual(self.state()['market_receivables'][0]['balance'], 0)
+        self.assertFalse(any(row['kind'] == 'Overdue receivable' for row in self.state()['exceptions']))
+
+        bank, = self.state()['bank_records']
+        reason = {'reason': 'Recorded in the wrong account'}
+        void = '/api/owner/money-records/'
+        self.call(f"{void}market-due/{item['id']}/void", reason, status=409)
+        self.call(f"{void}market-receipt/{receipt['id']}/void", reason, status=409)
+        self.call(f"{void}bank/{bank['id']}/void", reason)
+        for entry in self.state()['market_receipts']:
+            self.call(f"{void}market-receipt/{entry['id']}/void", reason)
+        self.assertEqual(self.state()['market_receivables'][0]['balance'], 500000)
+        self.call(f"{void}market-due/{item['id']}/void", reason)
+        self.call(route, due | {'amount': '4500'})
+        self.assertEqual([row['balance'] for row in self.state()['market_receivables']], [450000, 0])
+        self.assertEqual(self.state()['market_receivables'][1]['void']['reason'], reason['reason'])
+        self.assertEqual(self.call('/api/owner/daily-report'), report)
+
+    def test_concurrent_receivable_payments_cannot_overpay(self):
+        route = '/api/owner/receivables'
+        self.call(route, {'kind': 'invoice', 'party': 'Tenant', 'reference': 'NOV-RENT',
+                  'amount': '1000', 'recorded_on': '2026-11-22'})
+        item, = self.state()['market_receivables']
+        payment = {'receivable_id': item['id'], 'amount': '750', 'method': 'bank', 'paid_on': '2026-11-22'}
+
+        def pay(reference):
+            browser = Browser(self.app)
+            browser.cookies = self.browser.cookies.copy()
+            return browser.request(route + '/payments', payment | {'reference': reference})[0]
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            self.assertEqual(sorted(pool.map(pay, ['RENT-1', 'RENT-2'])), [200, 409])
+        self.assertEqual(self.state()['market_receivables'][0]['balance'], 25000)
+
     def test_upgrade_adds_control_tables_without_changing_existing_shifts(self):
         shift, _ = self.submit()
-        tables = ['manager_controls','tanks','customers','credit_allocations','repayments','record_voids','bank_records',
+        tables = ['market_receipts','market_receivables','manager_controls','tanks','customers','credit_allocations','repayments','record_voids','bank_records',
                   'corrections','shift_revisions','exception_acknowledgements']
         with closing(open_db(self.database)) as db, db:
             for table in tables:
@@ -151,6 +217,7 @@ class OwnerControlsTest(unittest.TestCase):
         self.assertEqual(self.call('/api/owner/shifts/1')['sales'],shift['sales'])
         self.assertEqual(self.state()['customers'][0]['balance'],40000)
         self.assertEqual(self.state()['tanks'],{})
+        self.assertEqual(self.state()['market_receivables'], [])
 
     def test_concurrent_repayments_cannot_overpay(self):
         self.submit()
@@ -227,12 +294,21 @@ class OwnerControlsTest(unittest.TestCase):
         shift, body = self.submit()
         self.call('/api/manager/business', status=404)
         self.call('/api/manager/repayments', {}, status=404)
+        self.call('/api/manager/receivables', {}, status=404)
+        self.call('/api/manager/business/banking', status=404)
+        self.call('/api/owner/receivables', {'kind': 'other', 'party': 'Station One Account',
+                  'amount': '100', 'reference': 'ST-1', 'recorded_on': '2026-11-22'})
+        receivable, = self.state()['market_receivables']
         self.call('/api/manager/shifts/1/revise', body, status=404)
         manager_id = self.call('/api/owner/managers')[0]['id']
         with closing(open_db(self.database)) as db, db:
             db.execute("INSERT INTO stations VALUES (2, 'Other', 'OTHER')")
             db.execute("UPDATE users SET station_id = 2 WHERE role = 'owner'")
         self.assertEqual(self.state()['customers'], [])
+        self.assertEqual(self.state()['market_receivables'], [])
+        self.call('/api/owner/receivables/payments', {'receivable_id': receivable['id'], 'amount': '1',
+                  'method': 'bank', 'reference': 'ST-2', 'paid_on': '2026-11-22'}, status=404)
+        self.call(f"/api/owner/money-records/market-due/{receivable['id']}/void", {'reason': 'Other station'}, status=404)
         self.call('/api/owner/managers/' + str(manager_id), {'action':'disable'}, status=404)
         self.call('/api/owner/bank-records', {'source':'shift:1','method':'cash','amount':'1','bank_date':'2026-11-22','reference':'OTHER'}, status=404)
         self.call('/api/owner/shifts/1/corrections', {'reason':'Other station'}, status=404)
