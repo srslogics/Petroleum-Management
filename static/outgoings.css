@@ -3,6 +3,8 @@
 .outgoing-table th small { display:block; margin-top:4px; color:var(--muted); font-size:var(--text-small); font-weight:400; }
 .outgoing-net { padding:12px 16px; background:var(--positive-soft); color:var(--positive); border-radius:8px; font-weight:600; font-size:var(--text-section); }
 .outgoing-detail-actions { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin:20px 0; }
+.outgoing-row-actions { display:flex; flex-wrap:wrap; align-items:center; column-gap:.25rem; }
+.bill-share-mobile { display:none; }
 .outgoing-history { padding:0; list-style:none; }
 .outgoing-history li { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); }
 .outgoing-history span { color:var(--muted); font-size:var(--text-small); }
@@ -13,6 +15,7 @@
  .outgoing-table th:first-child { min-width:0; width:60%; overflow-wrap:anywhere; }
  .outgoing-table th:not(:first-child):not(:nth-last-child(3)), .outgoing-table td:not(:first-child):not(:nth-last-child(3)) { display:none; }
  .outgoing-table tr > :nth-last-child(3) { text-align:right; }
+ .bill-share-mobile { display:inline-flex; padding-inline:0; }
  .outgoing-workspace .money-tabs { overflow-x:auto; }
  .outgoing-workspace .money-tabs button { white-space:nowrap; }
  .outgoing-history li { align-items:flex-start; flex-direction:column; }
