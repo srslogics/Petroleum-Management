@@ -6,7 +6,7 @@ const {tmpdir}=require('node:os');
 const path=require('node:path');
 const {chromium}=require('playwright');
 
-test('Owner ledger, saved contacts, WhatsApp and Banking work across desktop and mobile',async t=>{
+test('One Owner ledger shows incoming and outgoing balances across desktop and mobile',async t=>{
   const dir=await mkdtemp(path.join(tmpdir(),'petroleum-money-'));
   let origin,browser,logs='';
   const server=spawn(process.env.PYTHON||'python3',['-u','app.py','--port','0','--db',path.join(dir,'test.sqlite3')],{
@@ -21,8 +21,10 @@ test('Owner ledger, saved contacts, WhatsApp and Banking work across desktop and
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const post=async(route,data)=>{const result=await context.request.post(origin+'/api/'+route,{data});assert.equal(result.status(),200,await result.text());return result.json();};
   await post('owner/login',{email:'owner@demo.local',password:'OwnerDemo123!'});
-  await page.goto(origin+'/owner');await page.getByRole('button',{name:'Receivables',exact:true}).click();
+  await page.goto(origin+'/owner');await page.getByRole('button',{name:'Ledger',exact:true}).click();
   await page.getByRole('heading',{name:'No ledger entries yet'}).waitFor();
+  await page.getByRole('button',{name:'Receivables',exact:true}).click();
+  assert.equal(await page.getByRole('tab',{name:/^Ledger/}).count(),0);
   await page.getByRole('button',{name:'Manage contacts',exact:true}).click();
   await page.getByRole('button',{name:'Add contact',exact:false}).click();
   const contact = page.getByRole('dialog',{name:'Add contact'});
@@ -90,13 +92,13 @@ test('Owner ledger, saved contacts, WhatsApp and Banking work across desktop and
   assert.match(await page.getByRole('region',{name:'Total to collect'}).textContent(),/₹3,200.00/);
   await page.getByLabel('Search names or references').fill('ret-42');
   await otherDue.waitFor();
-  await page.getByRole('tab',{name:/^Ledger/}).click();
-  await page.getByLabel('Search people or businesses').fill('Fleet B');
+  await page.getByRole('button',{name:'Ledger',exact:true}).click();
+  await page.getByLabel('Search names or references').fill('Fleet B');
   await page.getByRole('button',{name:'View ledger for Fleet B',exact:true}).click();
   await dialog.getByRole('heading',{name:'Fleet B · Ledger'}).waitFor();
   await dialog.getByText('Fuel credit sale',{exact:true}).waitFor();
   await dialog.getByText('Receivable payment',{exact:true}).waitFor();
-  assert.match(await dialog.locator('.money-account-balance strong').textContent(),/₹3,200.00/);
+  assert.match(await dialog.locator('.ledger-balances dd').first().textContent(),/₹3,200.00/);
   await dialog.getByRole('button',{name:'WhatsApp',exact:true}).click();
   assert.equal(await dialog.getByLabel('WhatsApp number (optional)').inputValue(),'+919000000001');
   await page.keyboard.press('Escape');
@@ -116,14 +118,15 @@ test('Owner ledger, saved contacts, WhatsApp and Banking work across desktop and
   await page.getByRole('tab',{name:/^Settlements/}).click();assert.match(await card.locator('td').nth(4).textContent(),/100.00/);
   await page.setViewportSize({width:320,height:900});
   await page.getByRole('button',{name:/Open Shift #1.*Card receipt/}).click();await dialog.getByLabel('Net bank receipt (₹)').waitFor();await page.keyboard.press('Escape');
-  await page.getByRole('button',{name:'Receivables',exact:true}).click();
-  await page.getByRole('tab',{name:/^Ledger/}).click();
+  await page.getByRole('button',{name:'Ledger',exact:true}).click();
   await page.getByRole('button',{name:'View ledger for Fleet B',exact:true}).click();
   await dialog.getByRole('button',{name:'Open receivable'}).click();
   await dialog.getByText('Partially paid',{exact:true}).waitFor();
   await dialog.getByRole('button',{name:/RET-42-PART/}).waitFor();
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
   await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'More',exact:true}).click();
+  await page.getByRole('button',{name:'Receivables',exact:true}).click();
   await page.getByRole('tab',{name:/^Fuel credit/}).click();
   const rowB=page.getByRole('row').filter({has:page.getByRole('button',{name:'Open account for Fleet B',exact:true})});
   assert.equal(await rowB.locator('td').nth(3).isVisible(),true);
@@ -135,8 +138,7 @@ test('Owner ledger, saved contacts, WhatsApp and Banking work across desktop and
   assert.equal(await dialog.getByLabel(/^Customer/).inputValue(),'fleet b');
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await page.keyboard.press('Escape');
   await page.getByRole('button',{name:'Receivables help',exact:true}).click();await dialog.getByRole('heading',{name:'How Receivables works',exact:true}).waitFor();await page.keyboard.press('Escape');
-  await page.getByRole('button',{name:'More',exact:true}).click();
-  await page.getByRole('button',{name:'Payables',exact:true}).click();
+  await page.getByRole('button',{name:'Ledger',exact:true}).click();
   await page.getByRole('button',{name:'Add bill',exact:false}).click();
   const payee = dialog.getByRole('combobox',{name:'Supplier / payee'});
   await payee.fill('fle');
@@ -149,5 +151,24 @@ test('Owner ledger, saved contacts, WhatsApp and Banking work across desktop and
   await page.getByRole('button',{name:'Share bill BILL-QA for Fleet B on WhatsApp'}).click();
   await dialog.getByRole('heading',{name:'Share bill on WhatsApp'}).waitFor();
   assert.equal(await dialog.getByLabel('WhatsApp number (optional)').inputValue(),'+919000000001');
+  await dialog.getByRole('button',{name:'Close dialog'}).click();
+  const payables = await context.request.get(origin+'/api/owner/payables');
+  const {bills:[bill]} = await payables.json();
+  await post('owner/outgoings/payments',{kind:'bill',source_id:bill.id,amount:'50',paid_on:bill.bill_date,method:'bank',reference:'BILL-QA-PAID'});
+  await page.getByRole('button',{name:'Ledger',exact:true}).click();
+  const fleetLedger = page.getByRole('button',{name:'View ledger for Fleet B',exact:true});
+  await page.getByLabel('Ledger status').selectOption('outgoing');
+  await page.getByLabel('Search names or references').fill('BILL-QA');
+  await fleetLedger.waitFor();
+  assert.equal(await page.getByRole('button',{name:'View ledger for Fleet A',exact:true}).isVisible(),false);
+  assert.match(await page.getByRole('region',{name:'Total to collect'}).textContent(), /₹3,200.00/);
+  assert.match(await page.getByRole('region',{name:'Total to pay'}).textContent(), /₹150.00/);
+  await fleetLedger.click();
+  await dialog.getByText('Bill payment',{exact:true}).waitFor();
+  await dialog.getByText('Receivable payment',{exact:true}).waitFor();
+  assert.deepEqual(await dialog.locator('.ledger-balances dd').allTextContents(),['₹3,200.00','₹150.00']);
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+  await dialog.getByRole('button',{name:'Open bill'}).click();
+  await dialog.getByRole('heading',{name:'Bill details'}).waitFor();
   assert.deepEqual(errors,[]);
 });

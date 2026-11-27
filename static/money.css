@@ -199,6 +199,16 @@
 .ledger-entries > li > div:last-child { flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .ledger-entries .money-badge { margin-inline-start: 6px; }
 @media (max-width: 760px) {
-  #receivables-ledger-table :is(th, td):is(:nth-child(2), :nth-child(3)) { display: none; }
   .contact-list > li { padding-inline: 16px; }
+}
+
+.ledger-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ledger-balances { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0 0 24px; }
+.ledger-balances > div { border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-width: 0; }
+.ledger-balances dt { color: var(--muted); font-size: var(--text-small); }
+.ledger-balances dd { margin: 4px 0 0; font-size: var(--text-stat); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  #party-ledger-table .money-table :is(th, td) { padding-inline: 8px; }
+  .ledger-balances { gap: 8px; }
+  .ledger-balances > div { padding: 10px; }
 }

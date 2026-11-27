@@ -1,6 +1,6 @@
 "use strict";
 
-const moneyView = {tab:'ledger', bankTab:'banking', marketSearch:'', marketFilter:'outstanding', customerSearch:'', customerFilter:'all', bankFilter:'pending', method:'all'};
+const moneyView = {tab:'customers', bankTab:'banking', marketSearch:'', marketFilter:'outstanding', customerSearch:'', customerFilter:'all', bankFilter:'pending', method:'all'};
 const moneyActivity = {money:{search:'', filter:'all'}, banking:{search:'', filter:'all'}};
 const moneyBadge = (label, tone='neutral') => `<span class="money-badge ${tone}">${safe(label)}</span>`;
 const moneyEmpty = (title, description, action='') => `<div class="money-empty"><span class="money-empty-icon">${navigationIcon('money')}</span><h3>${title}</h3><p>${description}</p>${action}</div>`;
@@ -31,12 +31,11 @@ function showMoney(data, banking = false) {
   const cash = data.settlements.filter(item=>item.method === 'cash');
   const pending = data.settlements.filter(item=>item.remaining > 0).length;
   const activity = moneyActivities(data, banking);
-  const accounts = banking ? [] : buildReceivablesLedger(data);
   const view = banking ? 'banking' : 'money';
   const activityView = moneyActivity[view];
   const activeTab = moneyView[moneyTabKey(view)];
   const tabs = banking ? [['banking','Settlements',pending],['activity','Activity',activity.length]]
-    : [['ledger','Ledger',accounts.length],['customers','Fuel credit',data.customers.length],['market','Other dues',data.market_receivables.filter(item=>item.balance>0).length],['activity','Activity',activity.length]];
+    : [['customers','Fuel credit',data.customers.length],['market','Other dues',data.market_receivables.filter(item=>item.balance>0).length],['activity','Activity',activity.length]];
   const stats = banking ? [
     ['Bank receipts pending',digital.reduce((sum,item)=>sum+item.remaining,0),'UPI and card settlements','','bank'],
     ['Cash to deposit',cash.reduce((sum,item)=>sum+item.remaining,0),'Cash awaiting deposit','','cash'],
@@ -56,7 +55,6 @@ function showMoney(data, banking = false) {
     ${banking ? '' : pendingCreditSummary(data)}
     <section class="money-workspace" aria-label="${banking ? 'Banking' : 'Receivables'} workspace">
       <div class="money-workspace-top"><div class="money-tabs" role="tablist" aria-label="${banking ? 'Banking' : 'Receivables'} sections">${tabs.map(([key,label,count])=>`<button id="money-tab-${key}" role="tab" type="button" aria-selected="${activeTab===key}" aria-controls="money-panel-${key}" tabindex="${activeTab===key ? 0 : -1}">${label}<span class="tab-count">${count}</span></button>`).join('')}</div><button id="money-help" type="button" class="text-button money-help">How this works</button></div>
-      ${banking ? '' : receivablesLedgerPanel(accounts)}
       ${banking ? '' : `<div id="money-panel-customers" role="tabpanel" aria-labelledby="money-tab-customers" ${moneyView.tab==='customers' ? '' : 'hidden'}>
         <div class="money-toolbar"><h2>Customer accounts <span id="money-customer-count"></span></h2><div class="money-tools">${moneySearch('money-customer-search','Search customers',moneyView.customerSearch)}<label><span class="sr-only">Customer status</span><select id="money-customer-filter">${moneyOptions([['all','All customers'],['outstanding','With dues'],['overdue','Overdue']],moneyView.customerFilter)}</select></label></div></div>
         <div class="money-toolbar credit-actions">
@@ -78,7 +76,6 @@ function showMoney(data, banking = false) {
   if (!banking) {
     listen('money-add-receivable',()=>openMarketForm(data));
     bindMarketPanel(data);
-    bindReceivablesLedger(data,accounts);
     listen('money-contacts',openContacts);
     listen('money-add-customer',()=>openCustomerForm(data));
     listen('money-record-credit',()=>openShiftCredit(data));
@@ -121,7 +118,7 @@ function showMoney(data, banking = false) {
 function selectMoneyTab(key) {
   const view=document.getElementById('main-content').dataset.view;
   moneyView[moneyTabKey(view)]=key;
-  for (const name of view==='banking' ? ['banking','activity'] : ['ledger','customers','market','activity']) {
+  for (const name of view==='banking' ? ['banking','activity'] : ['customers','market','activity']) {
     const tab=document.getElementById('money-tab-'+name);tab.setAttribute('aria-selected',String(name===key));tab.tabIndex=name===key ? 0 : -1;
     document.getElementById('money-panel-'+name).hidden=name!==key;
   }

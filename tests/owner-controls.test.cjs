@@ -64,6 +64,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   await page.getByRole('heading',{name:'Station overview',exact:true}).waitFor();
   assert.equal(await setup.count(),0);
 
+  await page.getByRole('button',{name:'More',exact:true}).click();
   await page.getByRole('button',{name:'Receivables',exact:true}).click();
   await page.getByRole('button',{name:'+ Record credit',exact:true}).click();
   const credit = page.getByRole('dialog',{name:'Record customer credit'});
@@ -305,8 +306,8 @@ test('owner controls work through desktop and mobile screens', async t => {
   await page.keyboard.press('Escape');
   assert.equal(await more.getAttribute('aria-expanded'), 'false');
   assert.equal(await more.evaluate(element => element === document.activeElement), true);
-  for (const nav of ['Overview','Receivables','Payroll','Payables','Operations','Banking','Exceptions','Automation','Settings','Contacts','Team','Account security']) {
-    if (!['Overview','Receivables'].includes(nav)) await more.click();
+  for (const nav of ['Overview','Ledger','Receivables','Payroll','Payables','Operations','Banking','Exceptions','Automation','Settings','Contacts','Team','Account security']) {
+    if (!['Overview','Ledger'].includes(nav)) await more.click();
     await page.getByRole('button',{name:nav,exact:true}).click();
     await page.locator('.app-nav button[aria-current=page]', {hasText:nav}).waitFor({state:'attached'});
     assert.equal(await more.getAttribute('aria-expanded'), 'false');
@@ -315,6 +316,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   }
   if (process.env.OWNER_SCREENSHOT_DIR) {
     await mkdir(process.env.OWNER_SCREENSHOT_DIR,{recursive:true});
+    await more.click();
     await page.getByRole('button',{name:'Receivables',exact:true}).click();
     await page.getByRole('heading',{name:'Receivables',exact:true}).waitFor();
     await page.screenshot({path:path.join(process.env.OWNER_SCREENSHOT_DIR,'owner-money-mobile.png'),fullPage:true});

@@ -183,8 +183,8 @@ function showLogin(message = "") {
 }
 
 const ownerNavigation = [
-  ["Station", [["home", "Overview"], ["daily-report", "Daily report"], ["money", "Receivables"]]],
-  ["Payments", [["payroll", "Payroll"], ["payables", "Payables"]]],
+  ["Station", [["home", "Overview"], ["daily-report", "Daily report"], ["ledger", "Ledger"]]],
+  ["Finances", [["money", "Receivables"], ["payables", "Payables"], ["payroll", "Payroll"]]],
   ["Station operations", [["operations", "Operations"], ["banking", "Banking"], ["exceptions", "Exceptions"], ["automation", "Automation"]]],
   ["Administration", [["settings", "Settings"], ["contacts", "Contacts"], ["team", "Team"], ["security", "Account security"]]],
 ];
@@ -265,7 +265,7 @@ function shell(content, view = "home") {
     listen("contacts", openContacts);
     listen("automation", () => openAutomation());
     for (const view of ["payroll", "payables"]) listen(view, () => openOutgoings(view));
-    for (const view of ["money", "banking", "operations", "exceptions"]) listen(view, () => openBusiness(view));
+    for (const view of ["ledger", "money", "banking", "operations", "exceptions"]) listen(view, () => openBusiness(view));
   }
 }
 
@@ -894,6 +894,7 @@ function navigationIcon(id) {
     more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
     home: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     'daily-report': '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/>',
+    ledger: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 3v18m3-13h6m-6 4h6m-6 4h4"/>',
     money: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M16 14h2"/>',
     banking: '<path d="m3 9 9-5 9 5M4 10h16M6 11v6m6-6v6m6-6v6M4 20h16"/>',
     payroll: '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 12h5m-5 4h5m-5 4h5"/>',
