@@ -79,47 +79,51 @@ test('typography stays consistent across roles, reports, phone layouts and offli
     }
   };
 
+  const auditAuthLayout = async () => {
+    for (const [width,height] of [[1440,900],[390,844],[320,568],[844,390]]) {
+      await page.setViewportSize({width,height});
+      const layout = await page.locator('.auth-page').evaluate(surface => {
+        const measure = selector => {
+          const {left,right,top,bottom} = surface.querySelector(selector).getBoundingClientRect();
+          return {left,right,top,bottom};
+        };
+        return {
+          brand:measure('.auth-brand-panel'), form:measure('.auth-content'), footer:measure('.auth-footer'),
+          children:[...surface.children].map(element => element.className),
+          surfaceBackground:getComputedStyle(surface).backgroundImage,
+          brandBackground:getComputedStyle(surface.querySelector('.auth-brand-panel')).backgroundColor,
+          formBackground:getComputedStyle(surface.querySelector('.auth-content')).backgroundColor,
+          hasHorizontalScroll:document.documentElement.scrollWidth > innerWidth + 1,
+        };
+      });
+      assert.deepEqual(layout.children,['auth-brand-panel','auth-content','auth-footer']);
+      assert.match(layout.surfaceBackground,/^linear-gradient\(.*rgb\(12, 34, 60\).*rgb\(21, 92, 131\)/);
+      assert.equal(layout.brandBackground,'rgba(0, 0, 0, 0)');
+      assert.equal(layout.formBackground,'rgba(0, 0, 0, 0)');
+      assert.equal(layout.hasHorizontalScroll,false);
+      assert.equal(layout.brand.left,0);
+      assert.equal(layout.brand.top,0);
+      assert.equal(layout.form.right,width);
+      if (width <= 680) {
+        assert.equal(layout.brand.right,width);
+        assert.equal(layout.form.left,0);
+        assert.equal(layout.form.top,layout.brand.bottom);
+        assert.equal(layout.footer.top,layout.form.bottom);
+        assert.ok(layout.footer.bottom >= height);
+      } else {
+        assert.equal(layout.form.left,layout.brand.right);
+        assert.equal(layout.form.top,0);
+        assert.equal(layout.footer.top,layout.form.bottom);
+        assert.equal(layout.brand.bottom,layout.footer.bottom);
+        assert.ok(layout.brand.bottom >= height);
+      }
+    }
+  };
+
   await page.goto(origin+'/owner');
   await page.getByRole('heading',{name:'Sign in',exact:true}).waitFor();
   await audit('owner-sign-in');
-  for (const [width,height] of [[1440,900],[390,844],[320,568],[844,390]]) {
-    await page.setViewportSize({width,height});
-    const layout = await page.locator('.auth-page--owner').evaluate(surface => {
-      const measure = selector => {
-        const {left,right,top,bottom} = surface.querySelector(selector).getBoundingClientRect();
-        return {left,right,top,bottom};
-      };
-      return {
-        brand:measure('.auth-brand-panel'), form:measure('.auth-content'), footer:measure('.auth-footer'),
-        card:surface.querySelector('.auth-frame') !== null,
-        surfaceBackground:getComputedStyle(surface).backgroundImage,
-        brandBackground:getComputedStyle(surface.querySelector('.auth-brand-panel')).backgroundColor,
-        formBackground:getComputedStyle(surface.querySelector('.auth-content')).backgroundColor,
-        hasHorizontalScroll:document.documentElement.scrollWidth > innerWidth + 1,
-      };
-    });
-    assert.equal(layout.card,false);
-    assert.match(layout.surfaceBackground,/^linear-gradient\(.*rgb\(12, 34, 60\).*rgb\(21, 92, 131\)/);
-    assert.equal(layout.brandBackground,'rgba(0, 0, 0, 0)');
-    assert.equal(layout.formBackground,'rgba(0, 0, 0, 0)');
-    assert.equal(layout.hasHorizontalScroll,false);
-    assert.equal(layout.brand.left,0);
-    assert.equal(layout.brand.top,0);
-    assert.equal(layout.form.right,width);
-    if (width <= 680) {
-      assert.equal(layout.brand.right,width);
-      assert.equal(layout.form.left,0);
-      assert.equal(layout.form.top,layout.brand.bottom);
-      assert.equal(layout.footer.top,layout.form.bottom);
-      assert.ok(layout.footer.bottom >= height);
-    } else {
-      assert.equal(layout.form.left,layout.brand.right);
-      assert.equal(layout.form.top,0);
-      assert.equal(layout.footer.top,layout.form.bottom);
-      assert.equal(layout.brand.bottom,layout.footer.bottom);
-      assert.ok(layout.brand.bottom >= height);
-    }
-  }
+  await auditAuthLayout();
 
   await post('manager/login',{email:'manager@demo.local',password:'ManagerDemo123!'});
   await post('manager/shift',{openings:{1:100,2:200}});
@@ -178,6 +182,7 @@ test('typography stays consistent across roles, reports, phone layouts and offli
   await page.getByRole('button',{name:'Sign out',exact:true}).click();
   await page.getByRole('heading',{name:'Sign in',exact:true}).waitFor();
   await audit('manager-sign-in');
+  await auditAuthLayout();
 
   // The offline fallback must keep its typography and colors after the network disappears.
   await page.evaluate(async () => {

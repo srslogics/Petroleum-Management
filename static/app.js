@@ -76,9 +76,10 @@ function brand() {
   </a>`;
 }
 
-function authFrame(content) {
+function authPage(content) {
   const owner = role === "owner";
-  const panels = `<aside class="auth-brand-panel" aria-label="Tuljai Petroleum">
+  return `<div class="auth-page">
+    <aside class="auth-brand-panel" aria-label="Tuljai Petroleum">
       ${brand()}
       <div class="auth-brand-copy">
         <span class="auth-brand-line" aria-hidden="true"></span>
@@ -88,9 +89,7 @@ function authFrame(content) {
           : "Record readings, collections and deliveries."}</p>
       </div>
     </aside>
-    <div class="auth-content">${content}</div>`;
-  return `<div class="auth-page${owner ? " auth-page--owner" : ""}">
-    ${owner ? panels : `<div class="auth-frame">${panels}</div>`}
+    <div class="auth-content">${content}</div>
     <footer class="auth-footer">
       <a href="/${owner ? "manager" : "owner"}">${owner ? "Manager sign-in" : "Owner sign-in"}</a>
       <div id="auth-install"></div>
@@ -100,7 +99,7 @@ function authFrame(content) {
 
 function mountAuth(content) {
   if (installBar) document.body.append(installBar);
-  root.innerHTML = authFrame(content);
+  root.innerHTML = authPage(content);
   if (installBar) root.querySelector("#auth-install").append(installBar);
 }
 
