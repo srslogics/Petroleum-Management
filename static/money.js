@@ -1,6 +1,6 @@
 "use strict";
 
-const moneyView = {tab:'customers', bankTab:'banking', marketSearch:'', marketFilter:'outstanding', customerSearch:'', customerFilter:'all', bankFilter:'pending', method:'all'};
+const moneyView = {tab:'ledger', bankTab:'banking', marketSearch:'', marketFilter:'outstanding', customerSearch:'', customerFilter:'all', bankFilter:'pending', method:'all'};
 const moneyActivity = {money:{search:'', filter:'all'}, banking:{search:'', filter:'all'}};
 const moneyBadge = (label, tone='neutral') => `<span class="money-badge ${tone}">${safe(label)}</span>`;
 const moneyEmpty = (title, description, action='') => `<div class="money-empty"><span class="money-empty-icon">${navigationIcon('money')}</span><h3>${title}</h3><p>${description}</p>${action}</div>`;
@@ -31,11 +31,12 @@ function showMoney(data, banking = false) {
   const cash = data.settlements.filter(item=>item.method === 'cash');
   const pending = data.settlements.filter(item=>item.remaining > 0).length;
   const activity = moneyActivities(data, banking);
+  const accounts = banking ? [] : buildReceivablesLedger(data);
   const view = banking ? 'banking' : 'money';
   const activityView = moneyActivity[view];
   const activeTab = moneyView[moneyTabKey(view)];
   const tabs = banking ? [['banking','Settlements',pending],['activity','Activity',activity.length]]
-    : [['customers','Fuel credit',data.customers.length],['market','Other dues',data.market_receivables.filter(item=>item.balance>0).length],['activity','Activity',activity.length]];
+    : [['ledger','Ledger',accounts.length],['customers','Fuel credit',data.customers.length],['market','Other dues',data.market_receivables.filter(item=>item.balance>0).length],['activity','Activity',activity.length]];
   const stats = banking ? [
     ['Bank receipts pending',digital.reduce((sum,item)=>sum+item.remaining,0),'UPI and card settlements','','bank'],
     ['Cash to deposit',cash.reduce((sum,item)=>sum+item.remaining,0),'Cash awaiting deposit','','cash'],
@@ -46,6 +47,7 @@ function showMoney(data, banking = false) {
     ['Overdue',overdue,'Past the due date','',''],
   ];
   shell(`<div class="money-heading"><div>${heading('', banking ? 'Banking' : 'Receivables', banking ? 'Confirm UPI and card receipts and record cash deposits.' : 'Track money owed to the station and record payments as they come in.')}</div>${banking ? '' : `<div class="money-heading-actions">
+      <button id="money-contacts" class="secondary" type="button">Manage contacts</button>
       <button id="money-record-credit" class="secondary" type="button">+ Record credit</button>
       <button id="money-add-receivable" class="primary" type="button">+ Add receivable</button>
     </div>`}</div>
@@ -54,6 +56,7 @@ function showMoney(data, banking = false) {
     ${banking ? '' : pendingCreditSummary(data)}
     <section class="money-workspace" aria-label="${banking ? 'Banking' : 'Receivables'} workspace">
       <div class="money-workspace-top"><div class="money-tabs" role="tablist" aria-label="${banking ? 'Banking' : 'Receivables'} sections">${tabs.map(([key,label,count])=>`<button id="money-tab-${key}" role="tab" type="button" aria-selected="${activeTab===key}" aria-controls="money-panel-${key}" tabindex="${activeTab===key ? 0 : -1}">${label}<span class="tab-count">${count}</span></button>`).join('')}</div><button id="money-help" type="button" class="text-button money-help">How this works</button></div>
+      ${banking ? '' : receivablesLedgerPanel(accounts)}
       ${banking ? '' : `<div id="money-panel-customers" role="tabpanel" aria-labelledby="money-tab-customers" ${moneyView.tab==='customers' ? '' : 'hidden'}>
         <div class="money-toolbar"><h2>Customer accounts <span id="money-customer-count"></span></h2><div class="money-tools">${moneySearch('money-customer-search','Search customers',moneyView.customerSearch)}<label><span class="sr-only">Customer status</span><select id="money-customer-filter">${moneyOptions([['all','All customers'],['outstanding','With dues'],['overdue','Overdue']],moneyView.customerFilter)}</select></label></div></div>
         <div class="money-toolbar credit-actions">
@@ -75,6 +78,8 @@ function showMoney(data, banking = false) {
   if (!banking) {
     listen('money-add-receivable',()=>openMarketForm(data));
     bindMarketPanel(data);
+    bindReceivablesLedger(data,accounts);
+    listen('money-contacts',openContacts);
     listen('money-add-customer',()=>openCustomerForm(data));
     listen('money-record-credit',()=>openShiftCredit(data));
     data.pending_credits.forEach(item=>listen('pending-credit-'+item.id,()=>openShiftCredit(data,item)));
@@ -116,7 +121,7 @@ function showMoney(data, banking = false) {
 function selectMoneyTab(key) {
   const view=document.getElementById('main-content').dataset.view;
   moneyView[moneyTabKey(view)]=key;
-  for (const name of view==='banking' ? ['banking','activity'] : ['customers','market','activity']) {
+  for (const name of view==='banking' ? ['banking','activity'] : ['ledger','customers','market','activity']) {
     const tab=document.getElementById('money-tab-'+name);tab.setAttribute('aria-selected',String(name===key));tab.tabIndex=name===key ? 0 : -1;
     document.getElementById('money-panel-'+name).hidden=name!==key;
   }
@@ -139,7 +144,7 @@ function moneyDialog(title, body, drawer=false) {
   const dialog=document.getElementById('money-dialog');if(dialog.open)dialog.close();
   dialog.className=drawer ? 'money-drawer' : '';
   dialog.innerHTML=`<header class="money-dialog-header"><h2 id="money-dialog-title">${safe(title)}</h2><button id="money-dialog-close" class="text-button" type="button" aria-label="Close dialog">✕</button></header><div class="money-dialog-body">${body}</div>`;
-  listen('money-dialog-close',()=>dialog.close());dialog.showModal();dialog.querySelector('input:not([readonly]),select,textarea')?.focus();return dialog;
+  listen('money-dialog-close',()=>dialog.close());dialog.showModal();bindContactFields(dialog);dialog.querySelector('input:not([readonly]),select,textarea')?.focus();return dialog;
 }
 function bindMoneyForm(id,route,extra={},message='Saved successfully.') {
   const view=document.getElementById('main-content').dataset.view;
@@ -173,8 +178,7 @@ function openShiftCredit(data, item = null) {
   const route = '/shift-credit' + (item ? '/' + item.id : '');
   moneyDialog(item ? 'Edit pending credit' : 'Record customer credit', `<form id="shift-credit-form" class="money-form">
     <div class="money-source"><span>Shift #${shiftId}</span><strong>${businessDay(data.active.business_date)}</strong></div>
-    <label>Customer / account name<input name="party" list="credit-customer-names" value="${safe(item?.party)}" required maxlength="150"></label>
-    <datalist id="credit-customer-names">${data.customers.map(customer => `<option value="${safe(customer.name)}"></option>`).join('')}</datalist>
+    ${contactNameField('Customer / account name', 'party', item?.party, {knownNames: data.customers.map(customer => customer.name)})}
     ${numberField('Credit amount (₹)', 'amount', {required:true, min:0.01, value:item ? (item.amount / 100).toFixed(2) : undefined})}
     <label>Sale reference<input name="reference" value="${safe(item?.reference)}" placeholder="Receipt or invoice number" required maxlength="150"></label>
     <label>Note (optional)<textarea name="note" rows="2" maxlength="150">${safe(item?.note)}</textarea></label>
@@ -190,7 +194,8 @@ function openShiftCredit(data, item = null) {
 }
 
 function openCustomerForm(data,customer=null) {
-  moneyDialog(customer ? 'Set payment due date' : 'Add customer',`<form id="money-customer-form" class="money-form"><label>Customer / account name<input name="name" value="${safe(customer?.name || '')}" required maxlength="150" ${customer ? 'readonly' : 'autocomplete="organization"'}></label>${businessDate('Payment due date (optional)','due_date',customer?.due_date || '',false)}${errorbox}<button class="primary">Save customer</button></form>`);
+  moneyDialog(customer ? 'Set payment due date' : 'Add customer',`<form id="money-customer-form" class="money-form">${customer ? `<label>Customer / account name<input name="name" value="${safe(customer.name)}" readonly></label>`
+    : contactNameField('Customer / account name', 'name', '', {knownNames: data.customers.map(item => item.name)})}${businessDate('Payment due date (optional)','due_date',customer?.due_date || '',false)}${errorbox}<button class="primary">Save customer</button></form>`);
   bindMoneyForm('money-customer-form','/customers',{},'Customer saved.');
 }
 function openCustomerAccount(data,item) {
@@ -200,7 +205,8 @@ function openCustomerAccount(data,item) {
     <h3>Account activity</h3><div class="table-scroll"><table class="money-table"><thead><tr><th>Date</th><th>Entry</th><th class="numeric">Amount</th></tr></thead><tbody>${item.transactions.map(row=>`<tr><td>${safe(row.date)}</td><td>${safe(row.type)}<small>${safe(row.reference)}${row.note ? ' · '+safe(row.note) : ''}</small></td><td class="numeric">${money(row.amount)}</td></tr>`).join('')}</tbody></table></div>`,true);
   if (item.balance > 0) listen('money-account-whatsapp', () => openWhatsAppComposer(
     `Hello ${item.name}, this is a payment reminder from ${session.station}. Your outstanding balance is ${money(item.balance)}` +
-    (item.due_date ? `, due ${businessDay(item.due_date)}` : "") + ". Please share the payment reference once paid."
+    (item.due_date ? `, due ${businessDay(item.due_date)}` : "") + ". Please share the payment reference once paid.",
+    "Send with WhatsApp", item.name
   ));
   listen('money-account-payment',()=>openPaymentForm(data,item));listen('money-account-export',()=>downloadCustomerStatement(item,data.today));listen('money-account-due',()=>openCustomerForm(data,item));
 }
@@ -219,7 +225,7 @@ function openBankForm(data,item) {
   if(item.remaining>0)bindMoneyForm('money-bank-form','/bank-records',{source:item.source,method:item.method},item.method==='cash' ? 'Cash deposit recorded.' : 'Bank settlement recorded.');
 }
 function openAllocationForm(data) {
-  moneyDialog('Assign credit to a customer',`<p class="money-dialog-intro">These credit sales need a customer name.</p><form id="money-allocation-form" class="money-form"><label>Shift<select name="shift_id" required>${data.unallocated_shifts.map(item=>`<option value="${item.shift_id}">Shift #${item.shift_id} · ${money(item.remaining)} to assign</option>`).join('')}</select></label><label>Customer / account name<input name="name" list="money-account-names" required maxlength="150"></label><datalist id="money-account-names">${data.customers.map(item=>`<option value="${safe(item.name)}"></option>`).join('')}</datalist>${numberField('Credit amount to assign (₹)','amount',{required:true,min:0.01})}${businessText('Unique allocation reference','reference')}${errorbox}<button class="primary">Assign credit</button></form>`);
+  moneyDialog('Assign credit to a customer',`<p class="money-dialog-intro">These credit sales need a customer name.</p><form id="money-allocation-form" class="money-form"><label>Shift<select name="shift_id" required>${data.unallocated_shifts.map(item=>`<option value="${item.shift_id}">Shift #${item.shift_id} · ${money(item.remaining)} to assign</option>`).join('')}</select></label>${contactNameField('Customer / account name', 'name', '', {knownNames: data.customers.map(item => item.name)})}${numberField('Credit amount to assign (₹)','amount',{required:true,min:0.01})}${businessText('Unique allocation reference','reference')}${errorbox}<button class="primary">Assign credit</button></form>`);
   const form=document.getElementById('money-allocation-form');const update=()=>{form.elements.amount.max=data.unallocated_shifts.find(item=>item.shift_id===Number(form.elements.shift_id.value)).remaining/100;};form.elements.shift_id.addEventListener('change',update);update();
   bindForm('money-allocation-form',async form=>{const values=fields(form);await api('/credit-allocations',{...values,shift_id:Number(values.shift_id)});await openBusiness('money');showBusinessNotice('Credit assigned to customer.');});
 }
@@ -308,7 +314,7 @@ function filterMarketRows() {
 
 function openMarketForm(data) {
   moneyDialog('Add receivable', `<form id="market-receivable-form" class="money-form">
-    ${businessText('Owed by (person or company)', 'party')}
+    ${contactNameField('Owed by (person or company)', 'party', '', {knownNames: data.market_receivables.map(item => item.party)})}
     <div><label for="market-kind">Receivable type</label><select id="market-kind" name="kind" required><option value="">Choose a type</option>${moneyOptions(Object.entries(marketKinds))}</select></div>
     ${numberField('Amount owed (₹)', 'amount', {min: 0.01, required: true})}
     <div class="money-form-grid">${businessDate('Date owed', 'recorded_on', data.today)}${businessDate('Due date (optional)', 'due_date', '', false)}</div>

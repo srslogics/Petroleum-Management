@@ -138,7 +138,7 @@ test('typography stays consistent across roles, reports, phone layouts and offli
   const submitted = page.getByRole('region',{name:'Submitted shifts'});
   assert.ok(await submitted.evaluate(region => region.scrollWidth <= region.clientWidth + 1));
   await submitted.getByRole('button',{name:'Open shift 1 report'}).waitFor();
-  for (const name of ['Daily report','Receivables','Payroll','Payables','Automation','Operations','Banking','Exceptions','Settings','Team']) {
+  for (const name of ['Daily report','Receivables','Payroll','Payables','Automation','Operations','Banking','Exceptions','Settings','Contacts','Team']) {
     await page.setViewportSize({width:1440,height:1000});
     await page.getByRole('button',{name,exact:true}).click();
     await page.locator('h1').filter({hasText:name === 'Settings' ? 'Station settings' : name === 'Exceptions' ? 'Exception inbox' : name}).waitFor();
@@ -146,6 +146,7 @@ test('typography stays consistent across roles, reports, phone layouts and offli
     await audit('owner-'+name.toLowerCase().replace(' ','-'),{table:['Receivables','Daily report'].includes(name)});
     if (name === 'Automation') assert.ok(await page.locator('.auto-tabs').evaluate(tabs => tabs.scrollWidth <= tabs.clientWidth + 1));
     if (name === 'Receivables') {
+      await page.getByRole('tab',{name:/^Fuel credit/}).click();
       await page.getByRole('button',{name:'Open account for Fleet A',exact:true}).click();
       await audit('money-account-drawer',{table:true});
       await page.getByRole('dialog').getByRole('button',{name:'Record payment',exact:true}).click();

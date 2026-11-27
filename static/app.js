@@ -104,6 +104,7 @@ function mountAuth(content) {
 }
 
 function showLogin(message = "") {
+  contactRequest = undefined;
   const demoMode = document.querySelector('meta[name="demo-mode"]');
   mountAuth(`<main class="auth-form-panel">
     <header class="auth-heading">
@@ -185,7 +186,7 @@ const ownerNavigation = [
   ["Station", [["home", "Overview"], ["daily-report", "Daily report"], ["money", "Receivables"]]],
   ["Payments", [["payroll", "Payroll"], ["payables", "Payables"]]],
   ["Station operations", [["operations", "Operations"], ["banking", "Banking"], ["exceptions", "Exceptions"], ["automation", "Automation"]]],
-  ["Administration", [["settings", "Settings"], ["team", "Team"], ["security", "Account security"]]],
+  ["Administration", [["settings", "Settings"], ["contacts", "Contacts"], ["team", "Team"], ["security", "Account security"]]],
 ];
 
 function workspaceNavigation(view) {
@@ -261,6 +262,7 @@ function shell(content, view = "home") {
     listen("settings", openSettings);
     listen("daily-report", openDailyReport);
     listen("team", openTeam);
+    listen("contacts", openContacts);
     listen("automation", () => openAutomation());
     for (const view of ["payroll", "payables"]) listen(view, () => openOutgoings(view));
     for (const view of ["money", "banking", "operations", "exceptions"]) listen(view, () => openBusiness(view));
@@ -901,6 +903,7 @@ function navigationIcon(id) {
     exceptions: '<path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v4m0 4h.01"/>',
     security: '<path d="M12 22s7-4 7-11V6l-7-3-7 3v5c0 7 7 11 7 11Z"/><path d="m9 12 2 2 4-4"/>',
     settings: '<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/>',
+    contacts: '<rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="9" r="2.5"/><path d="M8 16a4 4 0 0 1 8 0"/>',
     team: '<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 5v2"/>',
     requests: '<path d="M21 11a8 8 0 0 1-8 8H4l-2 3V11a9 9 0 0 1 19 0Z"/><path d="M7 10h9m-9 4h6"/>',
   };

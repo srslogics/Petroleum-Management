@@ -163,14 +163,15 @@ function whatsappLink(label, message, digits = "") {
   return `<a class="secondary whatsapp-link" href="${safe(whatsappUrl(message, digits))}" target="_blank" rel="noopener noreferrer">${safe(label)}</a>`;
 }
 
-function openWhatsAppComposer(message = "", title = "Send with WhatsApp") {
+function openWhatsAppComposer(message = "", title = "Send with WhatsApp", party = "", savedPhone = "") {
   moneyDialog(title, `<form id="whatsapp-form" class="money-form">
-    <label>WhatsApp number (optional)<input name="recipient" type="tel" maxlength="24" placeholder="+91 …" autocomplete="off" aria-describedby="whatsapp-recipient-help"></label>
+    ${contactNameField("Find a saved contact (optional)", "contact", savedPhone ? party : "", {required: false, phoneField: "recipient"})}
+    <label>WhatsApp number (optional)<input name="recipient" type="tel" maxlength="24" placeholder="+91 …" autocomplete="off" value="${safe(savedPhone)}" ${savedPhone ? 'data-from-contact="true"' : ''} aria-describedby="whatsapp-recipient-help"></label>
     <p id="whatsapp-recipient-help" class="money-form-hint">Include the country code, or leave this blank to choose a contact in WhatsApp.</p>
     <div><label for="whatsapp-message">Message</label><textarea id="whatsapp-message" name="message" rows="6" maxlength="2000">${safe(message)}</textarea></div>
     ${errorbox}<button class="primary" type="submit">Open WhatsApp</button>
   </form>`);
-  bindForm("whatsapp-form", form => {
+  const form = bindForm("whatsapp-form", form => {
     const phone = form.elements.recipient.value.trim();
     const digits = whatsappNumber(phone);
     const text = form.elements.message.value.trim();
@@ -180,6 +181,13 @@ function openWhatsAppComposer(message = "", title = "Send with WhatsApp") {
     if (!digits && !text) throw new Error("Enter a number or write a message.");
     window.open(whatsappUrl(text, digits), "_blank", "noopener,noreferrer");
   }, false);
+  if (party && !savedPhone) ownerContacts().then(contacts => {
+    const contact = matchingContact(contacts, party);
+    if (!contact?.phone || !form.isConnected || form.elements.contact.value || form.elements.recipient.value) return;
+    form.elements.contact.value = contact.name;
+    form.elements.recipient.value = contact.phone;
+    form.elements.recipient.dataset.fromContact = 'true';
+  }).catch(() => {});
 }
 
 function managerControls(manager) {
@@ -319,6 +327,7 @@ function restoreEntries(form, entries) {
     for (const row of rows) {
       list.insertAdjacentHTML('beforeend', entryRow(category));
       const element = list.lastElementChild;
+      if (role === 'owner') bindContactFields(element);
       element.querySelectorAll('[data-field]').forEach(input => {
         if (row[input.dataset.field] !== undefined) input.value = row[input.dataset.field];
       });

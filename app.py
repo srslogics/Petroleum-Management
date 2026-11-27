@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 
 from automation import AUTOMATION_SCHEMA, Automation, accept_feed
 from security import Throttle, client_address
+from contacts import CONTACTS_SCHEMA, contacts_route
 from mfa import MFA, MFA_SCHEMA, mfa_cipher
 from manager_drafts import DRAFT_SCHEMA, draft_route, draft_query, unpack_draft
 from outgoings import OUTGOING_SCHEMA, outgoing_route
@@ -176,12 +177,13 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 """
 
-SCHEMA += OUTGOING_SCHEMA + DRAFT_SCHEMA + AUTOMATION_SCHEMA + MFA_SCHEMA
+SCHEMA += OUTGOING_SCHEMA + DRAFT_SCHEMA + AUTOMATION_SCHEMA + MFA_SCHEMA + CONTACTS_SCHEMA
 
 STATIC_FILES = {
     "/theme.css": "text/css",
     "/app.js": "text/javascript", "/styles.css": "text/css", "/workspace.css": "text/css", "/daily-report.js": "text/javascript",
-    "/typography.css": "text/css", "/money.css": "text/css", "/money.js": "text/javascript", "/outgoings.js": "text/javascript", "/outgoings.css": "text/css",
+    "/typography.css": "text/css", "/money.css": "text/css", "/money.js": "text/javascript", "/contacts.js": "text/javascript",
+    "/receivables-ledger.js": "text/javascript", "/outgoings.js": "text/javascript", "/outgoings.css": "text/css",
     "/manager-workflow.js": "text/javascript", "/manager-workflow.css": "text/css",
     "/mfa.js": "text/javascript", "/auth.css": "text/css",
     "/automation.js": "text/javascript", "/automation.css": "text/css",
@@ -1518,6 +1520,9 @@ class Request:
                 keys = ("active", "customers", "unallocated_credit", "unallocated_shifts", "settlements", "bank_records", "repayments",
                         "market_receivables", "market_receipts", "today")
                 return {key: state[key] for key in keys} | {"pending_credits": list(map(dict, pending))}
+            contacts = contacts_route(db, user["station_id"], method, route, data, fail=fail, required_note=required_note)
+            if contacts is not None:
+                return contacts
             control = owner_control_route(db, user, method, route, data)
             if control is not None:
                 return control

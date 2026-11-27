@@ -203,6 +203,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   await post('manager/shift',{openings:{}});
   await post('owner/shifts/2/submit',{closings:{1:111,2:211},collections:{credit:50},counted:0});
   await page.getByRole('button',{name:'Receivables',exact:true}).click();
+  await page.getByRole('tab',{name:/^Fuel credit/}).click();
   await page.getByRole('button',{name:'Assign credit',exact:false}).click();
   const allocation = page.getByRole('dialog');
   await allocation.getByLabel('Customer / account name').fill('Fleet B');
@@ -304,7 +305,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   await page.keyboard.press('Escape');
   assert.equal(await more.getAttribute('aria-expanded'), 'false');
   assert.equal(await more.evaluate(element => element === document.activeElement), true);
-  for (const nav of ['Overview','Receivables','Payroll','Payables','Operations','Banking','Exceptions','Automation','Settings','Team','Account security']) {
+  for (const nav of ['Overview','Receivables','Payroll','Payables','Operations','Banking','Exceptions','Automation','Settings','Contacts','Team','Account security']) {
     if (!['Overview','Receivables'].includes(nav)) await more.click();
     await page.getByRole('button',{name:nav,exact:true}).click();
     await page.locator('.app-nav button[aria-current=page]', {hasText:nav}).waitFor({state:'attached'});
