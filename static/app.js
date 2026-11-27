@@ -614,15 +614,20 @@ function showOwner(data) {
   const waiting = data.shifts.filter(shift => !shift.reviewed_at);
   const pending = waiting.length;
   const missingRates = fuelNames.some(fuel => !data.setup.fuels[fuel].rate);
+  const needsOpeningStock = data.can_edit_opening_stock && !data.opening_stock_confirmed;
   shell(`<div class="dashboard-heading">
     ${heading("", "Station overview")}
     <div class="report-controls"><label class="date-control">Business date<input id="date" type="date" value="${safe(data.date)}"></label>
       <button id="date-today" class="secondary" type="button">Today</button>
       <button id="open-daily-report" class="primary" type="button">Open daily report ${icon("arrow")}</button></div>
   </div>
-  ${missingRates ? `<div class="setup-notice"><span class="setup-icon">${icon("warning")}</span>
-    <div><strong>Set up your first shift</strong><p>Add Petrol and Diesel selling rates.</p></div>
-    <button id="setup-rates" class="secondary" type="button">Set fuel rates ${icon("arrow")}</button></div>` : ""}
+  ${missingRates || needsOpeningStock ? `<section class="setup-notice" aria-label="First-shift setup"><span class="setup-icon">${icon("warning")}</span>
+    <div><strong>Set up your first shift</strong>
+      <p>${needsOpeningStock ? "Confirm how much fuel is already in each tank before the first shift is submitted." : "Add Petrol and Diesel selling rates."}</p></div>
+    <div class="owner-setup-actions">
+      ${missingRates ? '<button id="setup-rates" class="secondary" type="button">Set fuel rates</button>' : ""}
+      ${needsOpeningStock ? '<button id="setup-stock" class="secondary" type="button">Confirm opening stock</button>' : ""}
+    </div></section>` : ""}
   <section class="owner-quick-actions" aria-label="Quick actions">
     <button id="quick-customer" class="secondary" type="button">${navigationIcon("money")} Add customer</button>
     <button id="quick-bill" class="secondary" type="button">${navigationIcon("payables")} Add bill</button>
@@ -691,6 +696,7 @@ function showOwner(data) {
   listen("quick-salary", () => openOutgoings("payroll", outgoingSalaryForm));
   if (pending) listen("review-next-shift", () => openShiftReport(Math.min(...waiting.map(shift => shift.id))));
   if (missingRates) listen("setup-rates", openSettings);
+  if (needsOpeningStock) listen("setup-stock", () => openOpeningStock(data.setup));
   bindDateFilter("/dashboard", showOwner);
   listen("open-daily-report", openDailyReport);
   for (const shift of data.shifts) {
@@ -814,6 +820,25 @@ function openSettings() {
   return loadOwnerView("/settings", data => showSettings(data.setup, data.can_edit_opening_stock));
 }
 
+function openingStockFields(setup, readonly = false) {
+  return fuelNames.map(fuel => numberField(fuel + " (L)", fuel, {
+    step: "0.001", value: decimal(setup.fuels[fuel].opening_stock, 1000), required: true, readonly,
+  })).join("");
+}
+
+function openOpeningStock(setup) {
+  moneyDialog("Confirm opening stock", `<form id="confirm-opening-stock" class="money-form">
+    <p class="money-form-hint">Use the measured starting balance for each fuel. Enter 0 for an empty tank. These balances lock when the first shift is submitted.</p>
+    <div class="money-form-grid">${openingStockFields(setup)}</div>
+    ${errorbox}<button class="primary">Save opening stock</button>
+  </form>`);
+  bindForm("confirm-opening-stock", async form => {
+    await api("/settings", { opening_stock: fields(form) });
+    await showHome();
+    showBusinessNotice("Opening stock confirmed.");
+  });
+}
+
 function showSettings(setup, canEditStock, confirmation = "") {
   shell(`${heading("", "Station settings", "Manage selling rates, nozzles and opening stock.")}
     ${confirmation ? `<div class="success" role="status">${safe(confirmation)}</div>` : ""}
@@ -834,9 +859,7 @@ function showSettings(setup, canEditStock, confirmation = "") {
     <section class="card"><header class="section-head"><div><h2>Opening stock</h2>
       <p>${canEditStock ? "Set the starting balance for each fuel before the first submission." : "Starting balances were locked at the first submission."}</p></div></header>
       <form id="stock"><div class="field-grid">
-        ${fuelNames.map(fuel => numberField(fuel + " (L)", fuel, { step: "0.001",
-          value: decimal(setup.fuels[fuel].opening_stock, 1000), required: true, readonly: !canEditStock,
-        })).join("")}
+        ${openingStockFields(setup, !canEditStock)}
       </div>${canEditStock ? errorbox + '<button class="primary">Save opening stock</button>' : ""}</form>
     </section>`, "settings");
   const save = (id, field, feedback) => bindForm(id, async form => {

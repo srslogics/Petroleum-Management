@@ -72,7 +72,7 @@ Turso keeps the records for this deployment, so the Web Service needs no persist
 
 The station and tables are initialized on the first app start or when running owner setup, whichever happens first. To set the station label at creation, provide `PETROLEUM_STATION_NAME` and `PETROLEUM_STATION_CODE` in the environment of that first run.
 
-Open `/owner` on the service's HTTPS URL. In **Settings**, enter the opening stock and current Petrol and Diesel rates and confirm the nozzle list. The initial list includes `P-01` and `D-01`. In **Team → Add a station manager**, enter the manager’s name, mobile number and password. Share the sign-in details privately. The manager can then sign in at `/manager` to enter the first shift’s meter readings.
+Open `/owner` on the service's HTTPS URL. From **Overview**, confirm the measured opening stock for both fuels before the first shift is submitted. You can confirm zero for an empty tank. Enter current Petrol and Diesel rates and confirm the nozzle list in **Settings**. The initial list includes `P-01` and `D-01`. In **Team → Add a station manager**, enter the manager’s name, mobile number and password. Share the sign-in details privately. The manager can then sign in at `/manager` to enter the first shift’s meter readings.
 
 If your dashboard offers **New → Blueprint**, you can import `render.yaml` from `main` instead of filling the Web Service form.
 
@@ -137,7 +137,7 @@ The owner navigation includes **Money**, **Operations** and **Exceptions** along
 
 ### Customer credit and repayments
 
-In **Money**, named credit entries from submitted shifts create customer balances. Customer names are matched without letter case; owners should consistently use the same account name. Use **Add customer** to create an account. Open a customer and choose **Set due date** to update its account-level payment date. Each customer has a transaction statement and CSV download. Outstanding balances past their due date appear in Exceptions.
+In **Money → Record credit**, the owner can add customer credit while a shift is open. Pending entries can be edited or removed until the manager submits the shift. At submission they appear in the Owner report and create customer balances. Customer names are matched without letter case; owners should consistently use the same account name. Use **Add customer** to create an account. Open a customer and choose **Set due date** to update its account-level payment date. Each customer has a transaction statement and CSV download. Outstanding balances past their due date appear in Exceptions.
 
 Credit entered only as a shift total remains visibly **unallocated**. Assign that credit to one or more customers in Money, within the remaining balance, using unique allocation references. Allocations do not change the shift's sales or collections.
 

@@ -29,10 +29,12 @@ function showMoney(data) {
   ];
   shell(`<div class="money-heading"><div>${heading('', 'Money', 'Stay on top of dues, receipts and deposits.')}</div><div class="money-heading-actions">
       <button id="money-add-customer" class="secondary" type="button">+ Add customer</button>
-      <button id="money-record-payment" class="primary" type="button" ${data.customers.some(item=>item.balance>0) ? '' : 'disabled title="There are no outstanding customer balances"'}>+ Record payment</button>
+      <button id="money-record-payment" class="secondary" type="button" ${data.customers.some(item=>item.balance>0) ? '' : 'disabled title="There are no outstanding customer balances"'}>+ Record payment</button>
+      <button id="money-record-credit" class="primary" type="button">+ Record credit</button>
     </div></div>
     <div class="money-stats">${stats.map(([label,value,caption,flag,tone])=>`<section class="money-stat ${tone}" aria-label="${label}"><div><span>${label}</span>${flag ? moneyBadge(flag,'warning') : ''}</div><strong>${money(value)}</strong><small>${caption}</small></section>`).join('')}</div>
     ${data.unallocated_credit ? `<div class="money-allocation-alert"><div>${navigationIcon('exceptions')}<span><strong>${money(data.unallocated_credit)} needs a customer</strong><span>Assign credit sales before recording a payment.</span></span></div><button id="money-allocate" type="button" class="text-button">Assign credit ${icon('arrow')}</button></div>` : ''}
+    ${pendingCreditSummary(data)}
     <section class="money-workspace" aria-label="Money workspace">
       <div class="money-workspace-top"><div class="money-tabs" role="tablist" aria-label="Money sections">${[['customers','Customers',data.customers.length],['banking','Banking',pending],['activity','Activity',activity.length]].map(([key,label,count])=>`<button id="money-tab-${key}" role="tab" type="button" aria-selected="${moneyView.tab===key}" aria-controls="money-panel-${key}" tabindex="${moneyView.tab===key ? 0 : -1}">${label}<span class="tab-count">${count}</span></button>`).join('')}</div><button id="money-help" type="button" class="text-button money-help">How this works</button></div>
       <div id="money-panel-customers" role="tabpanel" aria-labelledby="money-tab-customers" ${moneyView.tab==='customers' ? '' : 'hidden'}>
@@ -50,6 +52,8 @@ function showMoney(data) {
       <footer class="money-panel-footer"><span>All dates · Amounts in INR</span><span>Updated ${safe(timestamp(new Date().toISOString()))}</span><button id="money-mobile-help" class="text-button" type="button">Money help</button></footer>
     </section>`, 'money');
   listen('money-add-customer',()=>openCustomerForm(data));
+  listen('money-record-credit', () => openShiftCredit(data));
+  data.pending_credits.forEach(item => listen('pending-credit-' + item.id, () => openShiftCredit(data, item)));
   if (!data.customers.length) listen('money-first-customer',()=>openCustomerForm(data));
   listen('money-record-payment',()=>openPaymentForm(data));
   listen('money-help',()=>openMoneyHelp());
@@ -100,6 +104,45 @@ function moneyDialog(title, body, drawer=false) {
 function bindMoneyForm(id,route,extra={},message='Saved successfully.') {
   bindForm(id,async form=>{await api(route,{...fields(form),...extra});await openBusiness('money');showBusinessNotice(message);document.getElementById('money-tab-'+moneyView.tab).focus({preventScroll:true});});
 }
+function pendingCreditSummary(data) {
+  if (!data.pending_credits.length) return '';
+  const total = data.pending_credits.reduce((sum, item) => sum + item.amount, 0);
+  return `<details class="card pending-shift-credit">
+    <summary><strong>Pending shift credit</strong><span>Shift #${data.active.id} · ${money(total)}</span></summary>
+    <p class="money-form-hint">These sales appear in the report and customer balances when the manager submits this shift.</p>
+    <ul class="pending-credit-list">${data.pending_credits.map(item => `<li>
+      <span><strong>${safe(item.party)}</strong><small>${safe(item.reference)}</small></span>
+      <button id="pending-credit-${item.id}" class="secondary" type="button" aria-label="Edit credit for ${safe(item.party)}, reference ${safe(item.reference)}">${money(item.amount)} · Edit</button>
+    </li>`).join('')}</ul></details>`;
+}
+
+function openShiftCredit(data, item = null) {
+  if (!data.active) {
+    moneyDialog('Record customer credit', `<p class="money-dialog-intro">Record credit while a shift is open. Ask the manager to open a shift, or open a submitted shift’s report if you need to correct its figures.</p>
+      ${data.unallocated_credit ? '<button id="credit-assign-existing" class="secondary" type="button">Assign existing credit</button>' : ''}`);
+    if (data.unallocated_credit) listen('credit-assign-existing', () => openAllocationForm(data));
+    return;
+  }
+  const shiftId = data.active.id;
+  const route = '/shift-credit' + (item ? '/' + item.id : '');
+  moneyDialog(item ? 'Edit pending credit' : 'Record customer credit', `<form id="shift-credit-form" class="money-form">
+    <div class="money-source"><span>Shift #${shiftId}</span><strong>${businessDay(data.active.business_date)}</strong></div>
+    <label>Customer / account name<input name="party" list="credit-customer-names" value="${safe(item?.party)}" required maxlength="150"></label>
+    <datalist id="credit-customer-names">${data.customers.map(customer => `<option value="${safe(customer.name)}"></option>`).join('')}</datalist>
+    ${numberField('Credit amount (₹)', 'amount', {required:true, min:0.01, value:item ? (item.amount / 100).toFixed(2) : undefined})}
+    <label>Sale reference<input name="reference" value="${safe(item?.reference)}" placeholder="Receipt or invoice number" required maxlength="150"></label>
+    <label>Note (optional)<textarea name="note" rows="2" maxlength="150">${safe(item?.note)}</textarea></label>
+    <p class="money-form-hint">The credit posts to the customer’s account when this shift is submitted.</p>
+    ${errorbox}<button class="primary">Save credit</button>
+    ${item ? '<button id="void-pending-credit" class="secondary" type="button">Remove pending credit</button>' : ''}
+  </form>`);
+  bindMoneyForm('shift-credit-form', route, {shift_id:shiftId, action:item ? 'edit' : 'record'}, 'Credit saved for this shift.');
+  if (item) listen('void-pending-credit', () => {
+    moneyDialog('Remove pending credit?', `<form id="void-credit-form" class="money-form"><p>${safe(item.party)} · ${money(item.amount)} · ${safe(item.reference)}</p>${errorbox}<button class="primary">Remove credit</button></form>`);
+    bindMoneyForm('void-credit-form', route, {shift_id:shiftId, action:'void'}, 'Pending credit removed.');
+  });
+}
+
 function openCustomerForm(data,customer=null) {
   moneyDialog(customer ? 'Set payment due date' : 'Add customer',`<form id="money-customer-form" class="money-form"><label>Customer / account name<input name="name" value="${safe(customer?.name || '')}" required maxlength="150" ${customer ? 'readonly' : 'autocomplete="organization"'}></label>${businessDate('Payment due date (optional)','due_date',customer?.due_date || '',false)}${errorbox}<button class="primary">Save customer</button></form>`);
   bindMoneyForm('money-customer-form','/customers',{},'Customer saved.');
@@ -142,5 +185,5 @@ function openMoneyEntry(data,item) {
   });
 }
 function openMoneyHelp() {
-  moneyDialog('How Money works',`<div class="money-help-content"><section><h3>Customer dues</h3><p>Credit sales from submitted shifts create customer balances. Record payments here to reduce what a customer owes.</p></section><section><h3>Banking</h3><p>Match UPI and card collections to confirmed bank receipts. Enter the net receipt and any fees separately. Cash stays pending until a deposit is recorded.</p></section><section><h3>Keep payments separate</h3><p>Customer payments here are separate from fuel sales. Don’t enter the same payment again in a shift’s collections or cash count.</p></section><section><h3>Correct a mistake</h3><p>Open an entry in Activity and void it with a reason, then enter its replacement with a new reference. The original remains in history.</p></section></div>`);
+  moneyDialog('How Money works',`<div class="money-help-content"><section><h3>Customer dues</h3><p>Use Record credit while a shift is open. The sale is added to the customer balance when the manager submits the shift. Record payments here when a customer pays.</p></section><section><h3>Banking</h3><p>Match UPI and card collections to confirmed bank receipts. Enter the net receipt and any fees separately. Cash stays pending until a deposit is recorded.</p></section><section><h3>Keep payments separate</h3><p>Customer payments here are separate from fuel sales. Don’t enter the same payment again in a shift’s collections or cash count.</p></section><section><h3>Correct a mistake</h3><p>Open an entry in Activity and void it with a reason, then enter its replacement with a new reference. The original remains in history.</p></section></div>`);
 }

@@ -162,3 +162,12 @@
   #money-activity-table :is(th,td):is(:nth-child(1),:nth-child(3),:nth-child(5),:nth-child(6)) { display: none; }
   .money-table small.money-mobile-line { display: block; }
 }
+
+
+.pending-shift-credit > summary { cursor: pointer; }
+.pending-shift-credit > summary span { margin-left: 6px; color: var(--muted); }
+.pending-shift-credit > p { margin: 10px 0; }
+.pending-credit-list { list-style: none; padding: 0; margin: 0; }
+.pending-credit-list li { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+.pending-credit-list li > span { min-width: 0; overflow-wrap: anywhere; }
+.pending-credit-list small { display: block; color: var(--muted); }
