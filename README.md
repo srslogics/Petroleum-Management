@@ -175,7 +175,9 @@ Inter Variable 5.3.0 is bundled in `static/fonts` under the adjacent SIL Open Fo
 
 ### Receivables and Banking
 
-**Receivables** shows the total owed to the station, split into fuel credit and other dues. Existing customer accounts, statements and credit allocation are under **Fuel credit**. Use **Add receivable** for unpaid invoices, supplier refunds, loans or advances to recover, reimbursements, opening balances and other amounts owed. Open a receivable to record partial or full payments. Due dates feed the overdue total and the exception inbox. **Ledger** groups fuel credit and other dues by person or business. Open a party to see charges, payments and running balances, including voided entries.
+**Receivables** shows the total owed to the station, split into fuel credit and other dues. Existing customer accounts, statements and credit allocation are under **Fuel credit**. Use **Add receivable** for unpaid invoices, supplier refunds, loans or advances to recover, reimbursements, opening balances and other amounts owed. Open a receivable to record partial or full payments. Due dates feed the overdue total and the exception inbox.
+
+**Ledger** brings fuel credit, other receivables and bills into one view by person or business. Each account shows what the station needs to collect and pay, with separate running balances and the transaction history for both. Receivables and Payables are the entry workspaces.
 
 **Contacts** saves names and optional WhatsApp numbers for the station. The same directory supplies name suggestions in owner money, bill and staff entry forms. WhatsApp opens a draft with the saved number when available. Owners can also save or update a contact from the party ledger.
 

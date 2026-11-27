@@ -315,9 +315,13 @@ class OwnerControlsTest(unittest.TestCase):
         self.call('/api/owner/contacts', {'name': 'Station One Contact', 'phone': '9000000001'})
         contact, = self.call('/api/owner/contacts')['contacts']
         self.call('/api/manager/business/banking', status=404)
+        self.call('/api/manager/business/ledger', status=404)
         self.call('/api/owner/receivables', {'kind': 'other', 'party': 'Station One Account',
                   'amount': '100', 'reference': 'ST-1', 'recorded_on': '2026-11-22'})
         receivable, = self.state()['market_receivables']
+        self.call('/api/owner/payables/bills', {'kind': 'supplier', 'payee': 'Station One Supply',
+                  'reference': 'BILL-ST-1', 'amount': '75', 'bill_date': '2026-11-22',
+                  'due_date': '2026-11-23', 'note': 'Station supplies'})
         self.call('/api/manager/shifts/1/revise', body, status=404)
         manager_id = self.call('/api/owner/managers')[0]['id']
         with closing(open_db(self.database)) as db, db:
@@ -326,6 +330,8 @@ class OwnerControlsTest(unittest.TestCase):
         self.assertEqual(self.state()['customers'], [])
         self.assertEqual(self.state()['market_receivables'], [])
         self.assertEqual(self.call('/api/owner/contacts')['contacts'], [])
+        ledger = self.call('/api/owner/business/ledger')
+        self.assertEqual((ledger['customers'], ledger['market_receivables'], ledger['bills']), ([], [], []))
         self.call('/api/owner/contacts', {'id': contact['id'], 'phone': ''}, status=404)
         self.call('/api/owner/receivables/payments', {'receivable_id': receivable['id'], 'amount': '1',
                   'method': 'bank', 'reference': 'ST-2', 'paid_on': '2026-11-22'}, status=404)

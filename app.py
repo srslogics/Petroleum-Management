@@ -28,7 +28,7 @@ from security import Throttle, client_address
 from contacts import CONTACTS_SCHEMA, contacts_route
 from mfa import MFA, MFA_SCHEMA, mfa_cipher
 from manager_drafts import DRAFT_SCHEMA, draft_route, draft_query, unpack_draft
-from outgoings import OUTGOING_SCHEMA, outgoing_route
+from outgoings import OUTGOING_SCHEMA, Ledger, outgoing_route
 from database import TursoDatabase, execute_many, open_db, read_snapshot, transaction
 
 ROOT = Path(__file__).resolve().parent
@@ -183,7 +183,7 @@ STATIC_FILES = {
     "/theme.css": "text/css",
     "/app.js": "text/javascript", "/styles.css": "text/css", "/workspace.css": "text/css", "/daily-report.js": "text/javascript",
     "/typography.css": "text/css", "/money.css": "text/css", "/money.js": "text/javascript", "/contacts.js": "text/javascript",
-    "/receivables-ledger.js": "text/javascript", "/outgoings.js": "text/javascript", "/outgoings.css": "text/css",
+    "/ledger.js": "text/javascript", "/outgoings.js": "text/javascript", "/outgoings.css": "text/css",
     "/manager-workflow.js": "text/javascript", "/manager-workflow.css": "text/css",
     "/mfa.js": "text/javascript", "/auth.css": "text/css",
     "/automation.js": "text/javascript", "/automation.css": "text/css",
@@ -1513,6 +1513,18 @@ class Request:
             if method == "GET" and route == "/business/banking":
                 state = business_state(db, user["station_id"])
                 return {key: state[key] for key in ("settlements", "bank_records", "today")}
+            if method == "GET" and route == "/business/ledger":
+                ledger = Ledger(db, user, now, fail, number, note)
+                incoming_queries = business_queries(user["station_id"])
+                snapshot = read_snapshot(db, [*incoming_queries, *ledger.state_queries()])
+                boundary = len(incoming_queries)
+                incoming = business_state(db, user["station_id"], results=snapshot[:boundary])
+                outgoing = ledger.state(rows=snapshot[boundary:])
+                keys = ("customers", "repayments", "market_receivables", "market_receipts", "unallocated_credit", "today")
+                return {key: incoming[key] for key in keys} | {
+                    "bills": outgoing["bills"],
+                    "bill_payments": [entry for entry in outgoing["entries"] if entry["kind"] == "bill"],
+                }
             if method == "GET" and route == "/business/money":
                 sid = user["station_id"]
                 *rows, pending = read_snapshot(db, [*business_queries(sid), pending_credit_query(sid)])

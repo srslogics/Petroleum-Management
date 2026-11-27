@@ -29,7 +29,7 @@ const businessNote = (label = 'Note', name = 'note', required = false, limit = 5
 const businessDate = (label, name, value, required = true) => `<label>${label}<input type="date" name="${name}" value="${safe(value)}" ${required ? 'required' : ''}></label>`;
 
 function openBusiness(view = 'operations', afterRender) {
-  const render = {money: showMoney, banking: data => showMoney(data, true), exceptions: showExceptions, operations: showOperations}[view];
+  const render = {ledger: showLedger, money: showMoney, banking: data => showMoney(data, true), exceptions: showExceptions, operations: showOperations}[view];
   return loadOwnerView('/business/' + view, data => {
     render(data);
     afterRender?.(data);
