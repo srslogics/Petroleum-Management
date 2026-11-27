@@ -171,3 +171,17 @@
 .pending-credit-list li { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
 .pending-credit-list li > span { min-width: 0; overflow-wrap: anywhere; }
 .pending-credit-list small { display: block; color: var(--muted); }
+
+.money-toolbar.credit-actions { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; gap: 10px; padding-top: 0; }
+#main-content[data-view="banking"] .money-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.money-stat.dues { border-color: var(--accent-line); }
+.money-stat.dues > strong { color: var(--accent-hover); }
+.market-detail { min-height: 44px; overflow-wrap: anywhere; }
+.market-description { grid-column: 1 / -1; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  #market-table :is(th, td):is(:nth-child(2), :nth-child(3)) { display: none; }
+}
+@media (max-width: 385px) {
+  #main-content[data-view="money"] .money-tabs { gap: 8px; }
+  #main-content[data-view="money"] .tab-count { display: none; }
+}
