@@ -58,6 +58,9 @@ SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS stations (
     id INTEGER PRIMARY KEY, name TEXT NOT NULL, code TEXT NOT NULL UNIQUE
 );
+CREATE TABLE IF NOT EXISTS opening_stock_confirmations (
+    station_id INTEGER PRIMARY KEY REFERENCES stations(id)
+);
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY, station_id INTEGER NOT NULL REFERENCES stations(id),
     role TEXT NOT NULL CHECK(role IN ('manager','owner')), login_id TEXT NOT NULL UNIQUE,
@@ -90,6 +93,13 @@ CREATE TABLE IF NOT EXISTS shifts (
 CREATE UNIQUE INDEX IF NOT EXISTS one_open_shift ON shifts(station_id) WHERE submitted_at IS NULL;
 CREATE INDEX IF NOT EXISTS submitted_shifts_by_date ON shifts(station_id, business_date, id)
     WHERE submitted_at IS NOT NULL;
+CREATE TABLE IF NOT EXISTS shift_owner_credits (
+    id INTEGER PRIMARY KEY, station_id INTEGER NOT NULL REFERENCES stations(id),
+    shift_id INTEGER NOT NULL REFERENCES shifts(id), party TEXT NOT NULL, amount INTEGER NOT NULL,
+    reference TEXT NOT NULL COLLATE NOCASE, note TEXT NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id), voided_at TEXT,
+    UNIQUE(shift_id, reference)
+);
 CREATE TABLE IF NOT EXISTS manager_controls (
     user_id INTEGER PRIMARY KEY REFERENCES users(id), disabled INTEGER NOT NULL DEFAULT 0
 );
@@ -438,12 +448,13 @@ def report(db, sid, shift_id):
                 "SELECT r.*, u.name AS actor FROM shift_revisions r JOIN users u ON u.id = r.user_id WHERE r.station_id = ? AND r.shift_id = ? ORDER BY r.id", (sid, shift_id))]}
 
 
-def shift_entries(body):
+def shift_entries(body, payment_limit=100):
     entries = {}
     for category in ("payments", "deliveries", "expenses"):
         rows = body.get("entries", {}).get(category, [])
-        if not isinstance(rows, list) or len(rows) > 100:
-            fail("Enter up to 100 entries in each section.")
+        limit = payment_limit if category == "payments" else 100
+        if not isinstance(rows, list) or len(rows) > limit:
+            fail(f"Enter up to {limit} {category} entries.")
         entries[category] = []
         for row in rows:
             row = mapping(row, "entry")
@@ -472,6 +483,54 @@ def shift_entries(body):
     return entries
 
 
+def pending_credit_query(sid, shift_id=None):
+    sql = """SELECT c.id, c.party, c.amount, c.reference, c.note FROM shift_owner_credits c
+             JOIN shifts s ON s.id = c.shift_id WHERE c.station_id = ? AND s.station_id = ?
+             AND s.submitted_at IS NULL AND c.voided_at IS NULL"""
+    if shift_id is not None:
+        return sql + " AND c.shift_id = ? ORDER BY c.id", (sid, sid, shift_id)
+    return sql + " ORDER BY c.id", (sid, sid)
+
+
+def save_shift_credit(db, user, body, credit_id=None):
+    sid = user["station_id"]
+    shift_id = body.get("shift_id")
+    action = body.get("action")
+    if type(shift_id) is not int:
+        fail("Reopen Money to select the current shift.")
+    if action not in (("record",) if credit_id is None else ("edit", "void")):
+        fail("Choose a valid credit action.")
+    with transaction(db, immediate=True):
+        active = get_open(db, sid)
+        if not active or active["id"] != shift_id:
+            fail("The shift has closed or changed. Refresh Money before recording credit.", 409)
+        existing = list(db.execute(*pending_credit_query(sid, shift_id)))
+        if credit_id is not None and not any(row["id"] == credit_id for row in existing):
+            fail("This credit entry is no longer pending. Refresh Money.", 409)
+        if action == "void":
+            db.execute("UPDATE shift_owner_credits SET voided_at = ? WHERE id = ?", (now(), credit_id))
+            return {"ok": True}
+        party = required_note(body.get("party"), "a customer name", 150)
+        amount = number(body.get("amount"), 2, "credit amount")
+        if amount <= 0:
+            fail("Credit amount must be greater than zero.")
+        reference = required_note(body.get("reference"), "a sale reference", 150)
+        message = note(body.get("note", ""), "a note", 150)
+        try:
+            if action == "record":
+                if len(existing) >= 100:
+                    fail("The shift already has 100 credit entries.", 409)
+                db.execute("""INSERT INTO shift_owner_credits(station_id, shift_id, party, amount, reference, note, user_id)
+                              VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                           (sid, shift_id, party, amount, reference, message, user["id"]))
+            else:
+                db.execute("UPDATE shift_owner_credits SET party = ?, amount = ?, reference = ?, note = ? WHERE id = ?",
+                           (party, amount, reference, message, credit_id))
+        except sqlite3.IntegrityError:
+            fail("This sale reference has already been used for this shift.", 409)
+    return {"ok": True}
+
+
 def submit_shift(db, user, shift_id, body, *, revision=False):
     sid = user["station_id"]
     with transaction(db, immediate=True):
@@ -480,6 +539,7 @@ def submit_shift(db, user, shift_id, body, *, revision=False):
             fail("Shift not found.", 404)
         if row["submitted_at"] and not revision:
             fail("This shift has already been submitted.", 409)
+        payment_limit = 100
         if revision:
             if not row["submitted_at"]:
                 fail("Only a submitted shift can be corrected.", 409)
@@ -495,8 +555,9 @@ def submit_shift(db, user, shift_id, body, *, revision=False):
             version = required_note(body.get("expected_version"), "the report version; reopen the report to correct it", 64)
             if version != hashlib.sha256(row["report_json"].encode()).hexdigest():
                 fail("This report changed while you were editing. Reopen it before correcting the figures.", 409)
+            payment_limit = max(payment_limit, len(json.loads(row["report_json"]).get("entries", {}).get("payments", [])))
         mapping(body.get("entries", {}), "shift entries", ("payments", "deliveries", "expenses"))
-        entries = shift_entries(body)
+        entries = shift_entries(body, payment_limit)
         if user["role"] == "manager":
             if any(entry["method"] == "credit" or entry["party"] for entry in entries["payments"]):
                 fail("Managers record cash, UPI and card without customer details. Credit is recorded by the owner.")
@@ -510,6 +571,15 @@ def submit_shift(db, user, shift_id, body, *, revision=False):
         draft = json.loads(row["opening_json"])
         closings = mapping(body.get("closings"), "closing readings", (str(n["id"]) for n in draft["nozzles"]))
         collections_input = mapping(body.get("collections"), "collections", METHODS)
+        owner_credit = 0
+        if not revision:
+            pending = list(db.execute(*pending_credit_query(sid, shift_id)))
+            if pending and (any(entry["method"] == "credit" for entry in entries["payments"])
+                            or number(collections_input.get("credit"), 2, "credit", optional=True)):
+                fail("Credit is already pending in Money for this shift. Review it there before submitting.", 409)
+            for item in pending:
+                entries["payments"].append({key: item[key] for key in ("party", "amount", "reference", "note")} | {"method": "credit"})
+                owner_credit += item["amount"]
         deliveries_input = mapping(body.get("deliveries", {}), "deliveries", FUELS)
         physical_input = mapping(body.get("physical", {}), "physical stock readings", FUELS)
         litres = dict.fromkeys(FUELS, 0)
@@ -563,7 +633,13 @@ def submit_shift(db, user, shift_id, body, *, revision=False):
                        (now(), user["id"], json.dumps(payload), shift_id))
         if not revision:
             db.execute("DELETE FROM manager_shift_drafts WHERE shift_id = ? AND station_id = ?", (shift_id, sid))
-        return report(db, sid, shift_id)
+        result = report(db, sid, shift_id)
+        if user["role"] == "manager" and owner_credit:
+            result["entries"]["payments"] = [item for item in result["entries"]["payments"] if item["method"] != "credit"]
+            result["collections"]["credit"] = 0
+            result["collection_total"] -= owner_credit
+            result["collection_difference"] -= owner_credit
+        return result
 
 
 def stock_query(sid, fuel):
@@ -584,12 +660,13 @@ def stock_query(sid, fuel):
 def owner_state(db, sid, selected):
     queries = [
         *config_queries(sid), *(stock_query(sid, fuel) for fuel in FUELS),
+        ("SELECT 1 FROM opening_stock_confirmations WHERE station_id = ?", (sid,)),
         ("""SELECT s.id, s.submitted_at, s.report_json, u.name AS submitter, r.reviewed_at
             FROM shifts s JOIN users u ON u.id = s.submitted_by LEFT JOIN reviews r ON r.shift_id = s.id
             WHERE s.station_id = ? AND s.business_date = ? AND s.submitted_at IS NOT NULL ORDER BY s.id DESC""",
          (sid, selected)),
     ]
-    fuels, nozzles, petrol, diesel, rows, *business_rows = read_snapshot(db, [*queries, *business_queries(sid)])
+    fuels, nozzles, petrol, diesel, stock_confirmation, rows, *business_rows = read_snapshot(db, [*queries, *business_queries(sid)])
     business = business_state(db, sid, results=business_rows)
     setup = unpack_config(fuels, nozzles)
     daily = {fuel: {"litres": 0, "sales": 0} for fuel in FUELS}
@@ -614,6 +691,7 @@ def owner_state(db, sid, selected):
         })
     return {"date": selected, "daily": daily, "stock": stock, "shifts": shifts, "setup": setup,
             "can_edit_opening_stock": not petrol[0]["submitted"],
+            "opening_stock_confirmed": bool(stock_confirmation or any(row["opening_stock"] for row in fuels)),
             "business": {"active": business["active"], "tanks": business["tanks"],
                          "exceptions_count": sum(not issue["acknowledgement"] for issue in business["exceptions"]),
                          "customer_balance": business["unallocated_credit"] + sum(c["balance"] for c in business["customers"])}}
@@ -734,6 +812,7 @@ def save_config(db, sid, body):
                 quantity = number(stock.get(fuel), 3, f"{fuel} opening stock")
                 db.execute("UPDATE fuels SET opening_stock = ? WHERE station_id = ? AND fuel = ?",
                            (quantity, sid, fuel))
+            db.execute("INSERT INTO opening_stock_confirmations VALUES (?) ON CONFLICT DO NOTHING", (sid,))
         return config(db, sid)
 
 
@@ -965,6 +1044,9 @@ def owner_control_route(db, user, method, route, body):
     sid = user["station_id"]
     if method == "GET" and route == "/business":
         return business_state(db, sid)
+    credit_match = re.fullmatch(r"/shift-credit(?:/([0-9]{1,18}))?", route)
+    if method == "POST" and credit_match:
+        return save_shift_credit(db, user, body, int(credit_match[1]) if credit_match[1] else None)
     void_match = re.fullmatch(r"/money-records/(repayment|bank)/([0-9]{1,18})/void", route)
     if method == "POST" and void_match:
         kind, record_id = void_match[1], int(void_match[2])
@@ -1327,13 +1409,15 @@ class Request:
                 return list(map(dict, rows))
             if method == "GET" and route == "/business/operations":
                 return operations_state(db, user["station_id"])
-            if method == "GET" and route in ("/business/exceptions", "/business/money"):
+            if method == "GET" and route == "/business/exceptions":
                 state = business_state(db, user["station_id"])
-                keys = {
-                    "/business/exceptions": ("active", "exceptions"),
-                    "/business/money": ("customers", "unallocated_credit", "unallocated_shifts", "settlements", "bank_records", "repayments", "today"),
-                }
-                return {key: state[key] for key in keys[route]}
+                return {key: state[key] for key in ("active", "exceptions")}
+            if method == "GET" and route == "/business/money":
+                sid = user["station_id"]
+                *rows, pending = read_snapshot(db, [*business_queries(sid), pending_credit_query(sid)])
+                state = business_state(db, sid, results=rows)
+                keys = ("active", "customers", "unallocated_credit", "unallocated_shifts", "settlements", "bank_records", "repayments", "today")
+                return {key: state[key] for key in keys} | {"pending_credits": list(map(dict, pending))}
             control = owner_control_route(db, user, method, route, data)
             if control is not None:
                 return control

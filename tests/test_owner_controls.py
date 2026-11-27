@@ -42,6 +42,44 @@ class OwnerControlsTest(unittest.TestCase):
         body["expected_version"] = result["version"]
         return result, body
 
+    def test_owner_credit_posts_on_close_without_exposing_customer_details(self):
+        active = self.call('/api/manager/shift', {'openings': {'1': 100, '2': 200}})
+        money_path = '/api/owner/business/money'
+        entry = {'shift_id': active['id'], 'action': 'record', 'party': 'Fleet QA',
+                 'amount': '400', 'reference': 'SALE-1'}
+        self.call('/api/manager/shift-credit', entry, status=404)
+        self.call('/api/owner/shift-credit', entry)
+        self.call('/api/owner/shift-credit', entry | {'reference': 'sale-1'}, status=409)
+        self.call('/api/owner/shift-credit', entry | {'reference': 'SALE-2', 'amount': 0}, status=400)
+        pending, = self.call(money_path)['pending_credits']
+        self.assertEqual(self.call(money_path)['customers'], [])
+        self.assertNotIn('Fleet QA', str(self.call('/api/manager/shift')))
+        change = f"/api/owner/shift-credit/{pending['id']}"
+        self.call(change, entry | {'action': 'edit', 'amount': '468'})
+        self.call('/api/owner/shift-credit', entry | {'reference': 'SALE-2'})
+        extra = next(row for row in self.call(money_path)['pending_credits'] if row['reference'] == 'SALE-2')
+        self.call(f"/api/owner/shift-credit/{extra['id']}", {'shift_id': active['id'], 'action': 'void'})
+
+        body = {'closings': {'1': 110, '2': 210}, 'collections': {'cash': 1000, 'upi': 500}, 'counted': 1000}
+        self.call('/api/owner/shifts/1/submit', body | {'collections': {'cash': 1000, 'credit': 468}}, status=409)
+        receipt = self.call('/api/manager/shifts/1/submit', body)
+        self.assertNotIn('Fleet QA', str(receipt))
+        self.assertEqual(receipt['collections']['credit'], 0)
+        self.call('/api/manager/shifts/1/submit', body, status=409)
+        self.call(change, entry | {'action': 'edit'}, status=409)
+        self.assertEqual(self.call(money_path)['pending_credits'], [])
+        customer, = self.call(money_path)['customers']
+        self.assertEqual(customer['balance'], 46800)
+        self.assertEqual(len(customer['transactions']), 1)
+        report = self.call('/api/owner/daily-report')
+        self.assertEqual((report['sales'], report['receipts'], report['payments']['credit']), (196800, 150000, 46800))
+        self.assertEqual(report['sales_difference'], 0)
+        self.assertEqual(report['till']['cash_difference'], 0)
+        active = self.call('/api/manager/shift', {'openings': {}})
+        self.call('/api/owner/shift-credit', entry | {'reference': 'STALE'}, status=409)
+        self.call('/api/owner/shift-credit', entry | {'reference': 'CURRENT', 'shift_id': active['id']})
+        self.assertEqual(len(self.call(money_path)['pending_credits']), 1)
+
     def test_credit_repayments_allocation_and_restart(self):
         shift, body = self.submit()
         self.call('/api/owner/customers', {'name':'Fleet A','due_date':'2026-11-21'})

@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 const { mkdtemp, rm, mkdir } = require('node:fs/promises');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
@@ -28,6 +28,10 @@ test('owner controls work through desktop and mobile screens', async t => {
     await new Promise(resolve => setTimeout(resolve,100));
   }
   assert.ok(origin, logs);
+  // Recreate the stock state of a new station with selling rates already set.
+  execFileSync(process.env.PYTHON || 'python3', ['-c',
+    'import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); db.execute("UPDATE fuels SET opening_stock = 0"); db.commit(); db.close()',
+    path.join(directory,'test.sqlite3')]);
   browser = await chromium.launch({headless:true});
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -49,6 +53,36 @@ test('owner controls work through desktop and mobile screens', async t => {
   await page.goto(origin + '/owner');
   await page.getByRole('button',{name:'Fill demo sign-in'}).click();
   await page.getByRole('button',{name:'Sign in',exact:true}).click();
+  await page.setViewportSize({width:320,height:780});
+  const setup = page.getByRole('region',{name:'First-shift setup'});
+  await setup.getByRole('button',{name:'Confirm opening stock'}).click();
+  const stock = page.getByRole('dialog',{name:'Confirm opening stock'});
+  assert.equal(await stock.getByLabel('Petrol (L)',{exact:true}).inputValue(),'0');
+  await stock.getByRole('button',{name:'Save opening stock'}).click();
+  await page.getByRole('alert').getByText('Opening stock confirmed.').waitFor();
+  await page.reload();
+  await page.getByRole('heading',{name:'Station overview',exact:true}).waitFor();
+  assert.equal(await setup.count(),0);
+
+  await page.getByRole('button',{name:'Money',exact:true}).click();
+  await page.getByRole('button',{name:'+ Record credit',exact:true}).click();
+  const credit = page.getByRole('dialog',{name:'Record customer credit'});
+  await credit.getByLabel('Customer / account name').fill('Test Credit');
+  await credit.getByLabel('Credit amount (₹)',{exact:true}).fill('50');
+  await credit.getByLabel('Sale reference').fill('TEST-CREDIT');
+  await credit.getByRole('button',{name:'Save credit'}).click();
+  const pending = page.locator('.pending-shift-credit');
+  await pending.getByText('Pending shift credit',{exact:true}).click();
+  await pending.getByRole('button',{name:'Edit credit for Test Credit, reference TEST-CREDIT'}).click();
+  const edit = page.getByRole('dialog',{name:'Edit pending credit'});
+  assert.equal(await edit.getByLabel('Credit amount (₹)',{exact:true}).inputValue(),'50.00');
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+  await edit.getByRole('button',{name:'Remove pending credit'}).click();
+  await page.getByRole('dialog',{name:'Remove pending credit?'}).getByRole('button',{name:'Remove credit'}).click();
+  await pending.waitFor({state:'detached'});
+  await page.setViewportSize({width:1440,height:1000});
+  await page.getByRole('button',{name:'Overview',exact:true}).click();
+
   await page.getByRole('button',{name:'WhatsApp',exact:true}).click();
   const compose = page.getByRole('dialog',{name:'Send with WhatsApp'});
   await compose.getByLabel('WhatsApp number (optional)').fill('9000000002');
