@@ -45,16 +45,14 @@ function showMoney(data, banking = false) {
     ['Other dues',market,'Refunds, advances and other balances','',''],
     ['Overdue',overdue,'Past the due date','',''],
   ];
-  shell(`<div class="money-heading"><div>${heading('', banking ? 'Banking' : 'Receivables', banking ? 'Confirm UPI and card receipts and record cash deposits.' : 'Track money owed to the station and record payments as they come in.')}</div>${banking ? '' : `<div class="money-heading-actions">
-      <button id="money-contacts" class="secondary" type="button">Manage contacts</button>
-      <button id="money-record-credit" class="secondary" type="button">+ Record credit</button>
-      <button id="money-add-receivable" class="primary" type="button">+ Add receivable</button>
-    </div>`}</div>
-    <div class="money-stats">${stats.map(([label,value,caption,flag,tone])=>`<section class="money-stat ${tone}" aria-label="${label}"><div><span>${label}</span>${flag ? moneyBadge(flag,'warning') : ''}</div><strong>${money(value)}</strong><small>${caption}</small></section>`).join('')}</div>
+  const actions = `<button id="money-contacts" class="secondary" type="button">Manage contacts</button>
+    <button id="money-record-credit" class="secondary" type="button">+ Record credit</button>
+    <button id="money-add-receivable" class="primary" type="button">+ Add receivable</button>`;
+  const body = `    <div class="money-stats">${stats.map(([label,value,caption,flag,tone])=>`<section class="money-stat ${tone}" aria-label="${label}"><div><span>${label}</span>${flag ? moneyBadge(flag,'warning') : ''}</div><strong>${money(value)}</strong><small>${caption}</small></section>`).join('')}</div>
     ${!banking && data.unallocated_credit ? `<div class="money-allocation-alert"><div>${navigationIcon('exceptions')}<span><strong>${money(data.unallocated_credit)} needs a customer</strong><span>Assign credit sales before recording a payment.</span></span></div><button id="money-allocate" type="button" class="text-button">Assign credit ${icon('arrow')}</button></div>` : ''}
     ${banking ? '' : pendingCreditSummary(data)}
-    <section class="money-workspace" aria-label="${banking ? 'Banking' : 'Receivables'} workspace">
-      <div class="money-workspace-top"><div class="money-tabs" role="tablist" aria-label="${banking ? 'Banking' : 'Receivables'} sections">${tabs.map(([key,label,count])=>`<button id="money-tab-${key}" role="tab" type="button" aria-selected="${activeTab===key}" aria-controls="money-panel-${key}" tabindex="${activeTab===key ? 0 : -1}">${label}<span class="tab-count">${count}</span></button>`).join('')}</div><button id="money-help" type="button" class="text-button money-help">How this works</button></div>
+    <section class="money-workspace" aria-label="${banking ? 'Banking' : 'To collect'} workspace">
+      <div class="money-workspace-top"><div class="money-tabs" role="tablist" aria-label="${banking ? 'Banking' : 'To collect'} sections">${tabs.map(([key,label,count])=>`<button id="money-tab-${key}" role="tab" type="button" aria-selected="${activeTab===key}" aria-controls="money-panel-${key}" tabindex="${activeTab===key ? 0 : -1}">${label}<span class="tab-count">${count}</span></button>`).join('')}</div><button id="money-help" type="button" class="text-button money-help">How this works</button></div>
       ${banking ? '' : `<div id="money-panel-customers" role="tabpanel" aria-labelledby="money-tab-customers" ${moneyView.tab==='customers' ? '' : 'hidden'}>
         <div class="money-toolbar"><h2>Customer accounts <span id="money-customer-count"></span></h2><div class="money-tools">${moneySearch('money-customer-search','Search customers',moneyView.customerSearch)}<label><span class="sr-only">Customer status</span><select id="money-customer-filter">${moneyOptions([['all','All customers'],['outstanding','With dues'],['overdue','Overdue']],moneyView.customerFilter)}</select></label></div></div>
         <div class="money-toolbar credit-actions">
@@ -71,9 +69,12 @@ function showMoney(data, banking = false) {
         <div class="money-toolbar"><h2>Recent activity <span id="money-activity-count"></span></h2><div class="money-tools">${moneySearch('money-activity-search','Search reference or name',activityView.search)}<label><span class="sr-only">Entry status</span><select id="money-activity-filter">${moneyOptions([['all','All entries'],['recorded','Recorded'],['void','Voided']],activityView.filter)}</select></label></div></div>
         ${activity.length ? `<div class="table-scroll money-table-wrap" id="money-activity-table"><table class="money-table"><thead><tr><th>Date</th><th>Entry</th><th>Reference</th><th class="numeric">Amount</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>${activity.map((item,index)=>`<tr data-money-activity="${index}" data-search="${safe((item.reference+' '+item.party).toLocaleLowerCase())}" data-void="${Boolean(item.void)}"><td>${safe(item.date)}</td><th scope="row"><button id="money-activity-source-${index}" type="button" class="money-source-link" aria-label="Open entry ${safe(item.reference)}">${item.title}<small>${safe(item.party)}</small><small class="money-mobile-line">${safe(item.reference)} · ${safe(item.date)} · ${item.void ? 'Voided' : 'Recorded'}</small></button></th><td>${safe(item.reference)}</td><td class="numeric"><strong>${money(item.amount)}</strong></td><td>${moneyBadge(item.void ? 'Voided' : 'Recorded',item.void ? 'neutral' : 'positive')}</td><td><button id="money-activity-${index}" class="text-button" type="button">View entry</button></td></tr>`).join('')}</tbody></table></div><div id="money-no-activity" hidden>${moneyEmpty('No matching entries','Try another reference or change the status filter.')}</div>` : moneyEmpty('No activity yet',banking ? 'Settlements and deposits will appear here.' : 'Recorded dues and payments will appear here.')}
       </div>
-      <footer class="money-panel-footer"><span>All dates · Amounts in INR</span><span>Updated ${safe(timestamp(new Date().toISOString()))}</span><button id="money-mobile-help" class="text-button" type="button">${banking ? 'Banking help' : 'Receivables help'}</button></footer>
-    </section>`, view);
+      <footer class="money-panel-footer"><span>All dates · Amounts in INR</span><span>Updated ${safe(timestamp(new Date().toISOString()))}</span><button id="money-mobile-help" class="text-button" type="button">${banking ? 'Banking help' : 'Collection help'}</button></footer>
+    </section>`;
+  shell(banking ? `<div class="money-heading"><div>${heading('', 'Banking', 'Confirm UPI and card receipts and record cash deposits.')}</div></div>${body}`
+    : ledgerWorkspace('collect', 'Record credit and collect money owed to the station.', actions, body), view);
   if (!banking) {
+    bindLedgerNavigation('collect');
     listen('money-add-receivable',()=>openMarketForm(data));
     bindMarketPanel(data);
     listen('money-contacts',openContacts);
@@ -237,7 +238,7 @@ function openMoneyHelp(banking) {
   const content = banking
     ? '<section><h3>Settlements and deposits</h3><p>Match UPI and card totals to confirmed bank receipts and enter any fees separately. Record cash deposits after the cash reaches the bank.</p></section>'
     : '<section><h3>Fuel credit</h3><p>Record credit during an open shift. It becomes due when the manager submits the shift.</p></section><section><h3>Other dues</h3><p>Add refunds, loans, reimbursements and other amounts owed. Open a receivable to record a full or partial payment against it.</p></section>';
-  moneyDialog(banking ? 'How Banking works' : 'How Receivables works', `<div class="money-help-content">${content}<section><h3>Correct an entry</h3><p>Open the entry in Activity and void it with a reason. The original remains in history.</p></section></div>`);
+  moneyDialog(banking ? 'How Banking works' : 'How collections work', `<div class="money-help-content">${content}<section><h3>Correct an entry</h3><p>Open the entry in Activity and void it with a reason. The original remains in history.</p></section></div>`);
 }
 
 function marketStatus(item) {
@@ -310,6 +311,7 @@ function filterMarketRows() {
 }
 
 function openMarketForm(data) {
+  const view = document.getElementById('main-content').dataset.view;
   moneyDialog('Add receivable', `<form id="market-receivable-form" class="money-form">
     ${contactNameField('Owed by (person or company)', 'party', '', {knownNames: data.market_receivables.map(item => item.party)})}
     <div><label for="market-kind">Receivable type</label><select id="market-kind" name="kind" required><option value="">Choose a type</option>${moneyOptions(Object.entries(marketKinds))}</select></div>
@@ -321,8 +323,8 @@ function openMarketForm(data) {
   </form>`);
   bindForm('market-receivable-form', async form => {
     await api('/receivables', fields(form));
-    Object.assign(moneyView, {tab: 'market', marketSearch: '', marketFilter: 'outstanding'});
-    await openBusiness('money');
+    if (view === 'money') Object.assign(moneyView, {tab: 'market', marketSearch: '', marketFilter: 'outstanding'});
+    await openBusiness(view);
     showBusinessNotice('Receivable added.');
     document.getElementById('money-tab-market')?.focus({preventScroll: true});
   });

@@ -230,3 +230,20 @@
   #trial-balance-table .money-table :is(th,td) { padding-inline: 8px; }
   .ledger-account-note, .journal-list > li { padding-inline: 16px; }
 }
+
+.ledger-workspace-tabs {
+  flex-wrap: wrap;
+  column-gap: clamp(14px, 3vw, 28px);
+  row-gap: 0;
+  border-bottom: 1px solid var(--line);
+  margin: 0 0 20px;
+}
+.ledger-workspace-tabs > button { white-space: nowrap; padding-block: 11px 10px; }
+@media (max-width: 760px) {
+  .ledger-workspace-tabs { justify-content: flex-start; }
+}
+@media (max-width: 400px) {
+  .ledger-workspace-tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); column-gap: 8px; }
+  .ledger-workspace-tabs > button { grid-column: span 2; justify-content: center; }
+  .ledger-workspace-tabs > button:nth-last-child(-n+2) { grid-column: span 3; }
+}

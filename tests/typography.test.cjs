@@ -140,8 +140,13 @@ test('typography stays consistent across roles, reports, phone layouts and offli
   await submitted.getByRole('button',{name:'Open shift 1 report'}).waitFor();
   for (const name of ['Daily report','Ledger','Receivables','Payroll','Payables','Automation','Operations','Banking','Exceptions','Settings','Contacts','Team']) {
     await page.setViewportSize({width:1440,height:1000});
-    await page.getByRole('button',{name,exact:true}).click();
-    await page.locator('h1').filter({hasText:name === 'Settings' ? 'Station settings' : name === 'Exceptions' ? 'Exception inbox' : name}).waitFor();
+    const financeTab = {Receivables:'To collect', Payables:'To pay'}[name];
+    await page.getByRole('button',{name:financeTab ? 'Ledger' : name,exact:true}).click();
+    if (financeTab) {
+      await page.getByRole('tab',{name:financeTab,exact:true}).click();
+      await page.getByRole('tab',{name:financeTab,exact:true,selected:true}).waitFor();
+    }
+    await page.locator('h1').filter({hasText:financeTab ? 'Ledger' : name === 'Settings' ? 'Station settings' : name === 'Exceptions' ? 'Exception inbox' : name}).waitFor();
 
     await audit('owner-'+name.toLowerCase().replace(' ','-'),{table:['Receivables','Daily report','Ledger'].includes(name)});
     if (name === 'Automation') assert.ok(await page.locator('.auto-tabs').evaluate(tabs => tabs.scrollWidth <= tabs.clientWidth + 1));

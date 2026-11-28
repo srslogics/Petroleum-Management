@@ -13,8 +13,8 @@ function businessOverview(data) {
       <span class="action-label">${navigationIcon('exceptions')} Exceptions</span><strong>${count ? count + ' to check' : 'All clear'}</strong>
       <span class="action-detail">${count ? 'All dates · Open the inbox' : 'All dates · No open issues'}<span aria-hidden="true">↗</span></span>
     </button>
-    <button id="overview-money" type="button" class="overview-action" aria-label="Receivables ${money(balance)}">
-      <span class="action-label">${navigationIcon('money')} Receivables</span><strong>${money(balance)}</strong>
+    <button id="overview-money" type="button" class="overview-action" aria-label="To collect ${money(balance)}">
+      <span class="action-label">${navigationIcon('money')} To collect</span><strong>${money(balance)}</strong>
       <span class="action-detail">All dates · View amounts owed<span aria-hidden="true">↗</span></span>
     </button>
   </section>`;
