@@ -57,7 +57,7 @@ test('One Owner ledger shows incoming and outgoing balances across desktop and m
   await chat.getByRole('button',{name:'Close dialog'}).click();
   await openCollections();
   await page.getByRole('tab',{name:/^Fuel credit/}).click();
-  await page.getByRole('heading',{name:'Your credit customers, in one place'}).waitFor();
+  await page.getByRole('heading',{name:'No fuel credit recorded yet'}).waitFor();
   assert.equal(await page.locator('#money-record-payment').isDisabled(),true);
   await page.getByRole('tab',{name:/^Activity/}).click();await page.getByRole('heading',{name:'No activity yet'}).waitFor();
   await openMoneyTool('Banking');
@@ -66,15 +66,19 @@ test('One Owner ledger shows incoming and outgoing balances across desktop and m
   await page.getByRole('tab',{name:'Imports',exact:true,selected:true}).waitFor();
   await openCollections();
   await page.getByRole('tab',{name:/^Fuel credit/}).click();
-  await page.getByRole('button',{name:'Add your first customer',exact:false}).click();
-  await page.getByRole('dialog').getByLabel('Customer / account name').fill('Fleet A');
-  await page.getByRole('dialog').getByRole('button',{name:'Save customer'}).click();
-  await page.getByRole('dialog').waitFor({state:'hidden'});
-  await page.getByRole('button',{name:'Open account for Fleet A',exact:true}).waitFor();
+  await page.getByRole('heading',{name:'No fuel credit recorded yet'}).waitFor();
   await post('manager/login',{email:'manager@demo.local',password:'ManagerDemo123!'});
-  await post('manager/shift',{openings:{1:100,2:200}});
-  await post('owner/shifts/1/submit',{closings:{1:110,2:210},collections:{cash:100,upi:100,card:100},counted:90,expenses:10,
-    entries:{payments:[{method:'credit',amount:100,party:'Fleet A'},{method:'credit',amount:200,party:'Fleet B'}]}});
+  const openShift = await post('manager/shift',{openings:{1:100,2:200}});
+  await openCollections();
+  await page.getByRole('button',{name:'+ Record fuel credit',exact:true}).click();
+  const credit = page.getByRole('dialog',{name:'Record customer credit',exact:true});
+  await credit.getByLabel('Customer / account name').fill('Fleet A');
+  await credit.getByLabel('Credit amount (₹)').fill('100');
+  await credit.getByLabel('Sale reference').fill('FLEET-A-FIRST');
+  await credit.getByRole('button',{name:'Save credit',exact:true}).click();
+  await credit.waitFor({state:'hidden'});
+  await post('owner/shift-credit',{shift_id:openShift.id,action:'record',party:'Fleet B',amount:200,reference:'FLEET-B-FIRST'});
+  await post('manager/shifts/'+openShift.id+'/submit',{closings:{1:110,2:210},collections:{cash:100,upi:100,card:100},counted:90,expenses:10});
   await post('owner/customers',{name:'Fleet B',due_date:'2026-11-21'});
   await page.getByRole('button',{name:'Overview',exact:true}).click();await openCollections();
   const rowA=page.getByRole('row').filter({has:page.getByRole('button',{name:'Open account for Fleet A',exact:true})});

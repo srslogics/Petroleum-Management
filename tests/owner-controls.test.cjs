@@ -124,11 +124,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   await addStaff.getByLabel('Staff name').waitFor();
   await addStaff.getByRole('button',{name:'Close dialog'}).click();
   await page.getByRole('button',{name:'Overview',exact:true}).click();
-  await page.getByRole('region',{name:'Quick actions'}).getByRole('button',{name:'Add customer'}).click();
-  const addCustomer = page.getByRole('dialog',{name:'Add customer',exact:true});
-  await addCustomer.getByLabel('Customer / account name').waitFor();
-  await addCustomer.getByRole('button',{name:'Close dialog'}).click();
-  await page.getByRole('button',{name:'Overview',exact:true}).click();
+  assert.equal(await page.getByRole('region',{name:'Quick actions'}).getByRole('button',{name:'Add customer',exact:true}).count(),0);
 
   // Navigating away while a request is in flight keeps the newly selected page.
   let releaseRequest;
@@ -227,7 +223,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   await page.getByRole('button',{name:'Open account for Fleet A',exact:true}).click();
   await page.getByRole('button',{name:'Set due date',exact:true}).click();
   await page.getByRole('dialog').getByLabel('Payment due date (optional)').fill('2026-11-21');
-  await page.getByRole('dialog').getByRole('button',{name:'Save customer',exact:true}).click();
+  await page.getByRole('dialog').getByRole('button',{name:'Save due date',exact:true}).click();
   const customer = page.getByRole('row').filter({has:page.getByRole('button',{name:'Open account for Fleet A',exact:true})});
   await customer.getByText('Overdue',{exact:true}).waitFor();
   await customer.getByRole('button',{name:'Record payment',exact:true}).click();

@@ -628,7 +628,6 @@ function showOwner(data) {
       ${needsOpeningStock ? '<button id="setup-stock" class="secondary" type="button">Confirm opening stock</button>' : ""}
     </div></section>` : ""}
   <section class="owner-quick-actions" aria-label="Quick actions">
-    <button id="quick-customer" class="secondary" type="button">${navigationIcon("money")} Add customer</button>
     <button id="quick-bill" class="secondary" type="button">${navigationIcon("payables")} Add bill</button>
     <button id="quick-salary" class="secondary" type="button">${navigationIcon("payroll")} Add salary</button>
   </section>
@@ -690,7 +689,6 @@ function showOwner(data) {
     </section>
   </div>`);
   bindBusinessOverview();
-  listen("quick-customer", () => openBusiness("money", data => openCustomerForm(data)));
   listen("quick-bill", () => openOutgoings("bills", outgoingBillForm));
   listen("quick-salary", () => openOutgoings("salaries", outgoingSalaryForm));
   if (pending) listen("review-next-shift", () => openShiftReport(Math.min(...waiting.map(shift => shift.id))));

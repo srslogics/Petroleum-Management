@@ -137,7 +137,7 @@ The owner navigation includes **Money**, **Operations** and **Exceptions** along
 
 ### Customer credit and repayments
 
-In **Money → Record credit**, the owner can add customer credit while a shift is open. Pending entries can be edited or removed until the manager submits the shift. At submission they appear in the Owner report and create customer balances. Customer names are matched without letter case; owners should consistently use the same account name. Use **Add customer** to create an account. Open a customer and choose **Set due date** to update its account-level payment date. Each customer has a transaction statement and CSV download. Outstanding balances past their due date appear in Exceptions.
+In **Ledger → Money tools → To collect**, use **Record fuel credit** while a shift is open. Pending entries can be edited or removed until the manager submits the shift. At submission they appear in the Owner report and create customer balances. Customer names are matched without letter case; owners should consistently use the same account name. Enter the name on the credit sale or choose a saved contact. Open the credit account after submission and choose **Set due date** to update its payment date. Each customer has a transaction statement and CSV download. Outstanding balances past their due date appear in Exceptions.
 
 Credit entered only as a shift total remains visibly **unallocated**. Assign that credit to one or more customers in Money, within the remaining balance, using unique allocation references. Allocations do not change the shift's sales or collections.
 
