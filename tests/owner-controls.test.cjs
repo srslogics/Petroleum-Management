@@ -51,7 +51,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   const openCollections = async () => {
     const tab = page.getByRole('tab',{name:'To collect',exact:true});
     await page.getByRole('button',{name:'Ledger',exact:true}).click();
-    await page.getByRole('tab',{name:'Parties',exact:true,selected:true}).waitFor();
+    await page.getByRole('tab',{name:'Balances',exact:true,selected:true}).waitFor();
     await tab.click();
     await page.locator('#ledger-tab-collect[aria-selected="true"]').waitFor();
   };
@@ -182,7 +182,7 @@ test('owner controls work through desktop and mobile screens', async t => {
 
   // A correction request is answered by the manager, applied by the owner, and audited.
   await page.getByRole('button',{name:'Overview',exact:true}).click();
-  await page.getByRole('button',{name:'Review next shift'}).click();
+  await page.getByRole('button',{name:/1 shift awaiting review/}).click();
   await page.getByRole('heading',{name:'Shift #1',exact:true}).waitFor();
   await page.locator('#request-correction').getByLabel('Ask the manager to clarify or correct').fill('Confirm counted cash');
   await page.getByRole('button',{name:'Send correction request'}).click();

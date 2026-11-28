@@ -1,7 +1,7 @@
 "use strict";
 
 const ledgerView = {tab: 'parties', date: '', search: '', status: 'all', account: ''};
-const ledgerTabs = [['parties', 'Parties'], ['collect', 'To collect'], ['pay', 'To pay'], ['journal', 'Journal'], ['trial', 'Trial balance']];
+const ledgerTabs = [['parties', 'Balances'], ['collect', 'To collect'], ['pay', 'To pay'], ['journal', 'Journal'], ['trial', 'Trial balance']];
 
 function ledgerWorkspace(active, description, actions, body) {
   const tabs = ledgerTabs.map(([key, title]) =>
@@ -93,9 +93,12 @@ function showLedger(data) {
   const parties = buildPartyLedger(data);
   const collect = parties.reduce((sum, party) => sum + party.incoming, financial.unassigned);
   const pay = parties.reduce((sum, party) => sum + party.outgoing, 0);
-  const actions = `<button id="ledger-new-bill" class="secondary" type="button">+ Add bill</button>
-    <button id="ledger-new-receivable" class="secondary" type="button">+ Add receivable</button>
-    <button id="ledger-new-journal" class="primary" type="button">+ Journal entry</button>`;
+  const actions = {
+    parties: `<button id="ledger-new-bill" class="secondary" type="button">+ Add bill</button>
+      <button id="ledger-new-receivable" class="primary" type="button">+ Record money owed</button>`,
+    journal: '<button id="ledger-new-journal" class="primary" type="button">+ Journal entry</button>',
+    trial: '',
+  }[ledgerView.tab];
   const body = `    <form id="ledger-date-form" class="ledger-date-form" aria-label="Statement date">
       <label>As of date<input name="date" type="date" value="${safe(financial.as_of)}" max="${safe(today)}" required></label>
       <button class="secondary">View statement</button>
@@ -112,16 +115,19 @@ function showLedger(data) {
     <section class="money-workspace" aria-label="Financial ledger">
       ${ledgerView.tab === 'parties' ? partyList(parties) : ledgerView.tab === 'journal' ? journalPanel(data) : trialBalancePanel(financial)}
     </section>`;
-  shell(ledgerWorkspace(ledgerView.tab, 'Party balances, journal and trial balance.', actions, body), 'ledger');
+  shell(ledgerWorkspace(ledgerView.tab, 'See who owes you and who you need to pay.', actions, body), 'ledger');
   bindForm('ledger-date-form', async form => {
     const prior = ledgerView.date;
     ledgerView.date = form.elements.date.value === today ? '' : form.elements.date.value;
     try { await openBusiness('ledger'); }
     catch (error) { ledgerView.date = prior; throw error; }
   });
-  listen('ledger-new-bill', () => outgoingBillForm(data));
-  listen('ledger-new-receivable', () => openMarketForm(data));
-  listen('ledger-new-journal', () => openManualJournal(data));
+  if (ledgerView.tab === 'parties') {
+    listen('ledger-new-bill', () => outgoingBillForm(data));
+    listen('ledger-new-receivable', () => openMarketForm(data));
+  } else if (ledgerView.tab === 'journal') {
+    listen('ledger-new-journal', () => openManualJournal(data));
+  }
   if (document.getElementById('ledger-assign-credit')) listen('ledger-assign-credit', () => openBusiness('money', openAllocationForm));
   bindLedgerNavigation(ledgerView.tab, data);
   if (ledgerView.tab === 'parties') bindPartyList(data, parties);

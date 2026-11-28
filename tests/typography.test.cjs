@@ -135,6 +135,7 @@ test('typography stays consistent across roles, reports, phone layouts and offli
   await page.getByRole('heading',{name:'Station overview'}).waitFor();
   await audit('owner-overview',{table:true});
   assert.match(await page.getByRole('region',{name:'Daily fuel sales'}).evaluate(element => getComputedStyle(element).backgroundImage), /rgb\(12, 34, 60\)/);
+  await page.locator('#submitted-shifts > summary').click();
   const submitted = page.getByRole('region',{name:'Submitted shifts'});
   assert.ok(await submitted.evaluate(region => region.scrollWidth <= region.clientWidth + 1));
   await submitted.getByRole('button',{name:'Open shift 1 report'}).waitFor();
@@ -166,7 +167,7 @@ test('typography stays consistent across roles, reports, phone layouts and offli
     }
   }
   await page.getByRole('button',{name:'Overview',exact:true}).click();
-  await page.getByRole('button',{name:'Open shift 1 report'}).click();
+  await page.getByRole('button',{name:/1 shift awaiting review/}).click();
   await page.getByRole('heading',{name:'Shift #1',exact:true}).waitFor();
   await audit('owner-shift-report');
   await page.getByRole('button',{name:'Correct report figures'}).click();

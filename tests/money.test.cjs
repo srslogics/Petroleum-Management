@@ -23,7 +23,7 @@ test('One Owner ledger shows incoming and outgoing balances across desktop and m
   const openCollections = async () => {
     const tab = page.getByRole('tab',{name:'To collect',exact:true});
     await page.getByRole('button',{name:'Ledger',exact:true}).click();
-    await page.getByRole('tab',{name:'Parties',exact:true,selected:true}).waitFor();
+    await page.getByRole('tab',{name:'Balances',exact:true,selected:true}).waitFor();
     await tab.click();
     await page.locator('#ledger-tab-collect[aria-selected="true"]').waitFor();
   };
@@ -156,7 +156,7 @@ test('One Owner ledger shows incoming and outgoing balances across desktop and m
   await dialog.getByLabel('Description').fill('Test bill');
   await dialog.getByRole('button',{name:'Add bill',exact:true}).click();
   await page.getByRole('alert').getByText('Record saved.').waitFor();
-  assert.equal(await page.getByRole('tab',{name:'Parties',exact:true}).getAttribute('aria-selected'),'true');
+  assert.equal(await page.getByRole('tab',{name:'Balances',exact:true}).getAttribute('aria-selected'),'true');
   await page.getByRole('tab',{name:'To pay',exact:true}).click();
   await page.getByRole('button',{name:'Share bill BILL-QA for Fleet B on WhatsApp'}).click();
   await dialog.getByRole('heading',{name:'Share bill on WhatsApp'}).waitFor();
@@ -171,7 +171,7 @@ test('One Owner ledger shows incoming and outgoing balances across desktop and m
   await dialog.getByLabel('Unique payment reference').fill('BILL-QA-PAID');
   await dialog.getByRole('button',{name:'Record payment',exact:true}).click();
   await page.getByRole('alert').getByText('Record saved.').waitFor();
-  await page.getByRole('tab',{name:'Parties',exact:true,selected:true}).waitFor();
+  await page.getByRole('tab',{name:'Balances',exact:true,selected:true}).waitFor();
   await page.getByLabel('Ledger status').selectOption('outgoing');
   await page.getByLabel('Search names or references').fill('BILL-QA');
   await fleetLedger.waitFor();
@@ -186,11 +186,11 @@ test('One Owner ledger shows incoming and outgoing balances across desktop and m
   await dialog.getByRole('button',{name:'Open bill'}).click();
   await dialog.getByRole('heading',{name:'Bill details'}).waitFor();
   await dialog.getByRole('button',{name:'Close dialog'}).click();
-  assert.equal(await page.getByRole('tab',{name:'Parties',exact:true}).getAttribute('aria-selected'),'true');
-  await page.getByRole('button',{name:'+ Add receivable',exact:true}).click();
+  assert.equal(await page.getByRole('tab',{name:'Balances',exact:true}).getAttribute('aria-selected'),'true');
+  await page.getByRole('button',{name:'+ Record money owed',exact:true}).click();
   await dialog.getByRole('heading',{name:'Add receivable'}).waitFor();
   await dialog.getByRole('button',{name:'Close dialog'}).click();
-  assert.equal(await page.getByRole('tab',{name:'Parties',exact:true}).getAttribute('aria-selected'),'true');
+  assert.equal(await page.getByRole('tab',{name:'Balances',exact:true}).getAttribute('aria-selected'),'true');
   const dateField = page.getByLabel('As of date');
   const today = await dateField.inputValue();
   await dateField.fill('2000-01-01');
@@ -200,6 +200,8 @@ test('One Owner ledger shows incoming and outgoing balances across desktop and m
   await dateField.fill(today);
   await page.getByRole('button',{name:'View statement',exact:true}).click();
   await fleetLedger.waitFor();
+  assert.equal(await page.getByRole('button',{name:'+ Journal entry',exact:true}).count(),0);
+  await page.getByRole('tab',{name:'Journal',exact:true}).click();
   await page.getByRole('button',{name:'+ Journal entry',exact:true}).click();
   await dialog.getByLabel('Reference',{exact:true}).fill('INV-OPEN');
   await dialog.getByLabel('Description',{exact:true}).fill('Opening fuel stock value');
@@ -228,16 +230,16 @@ test('One Owner ledger shows incoming and outgoing balances across desktop and m
   const download = page.waitForEvent('download');
   await page.getByRole('button',{name:'Export trial balance',exact:true}).click();
   assert.equal((await download).suggestedFilename(),'trial-balance-'+today+'.csv');
-  await page.getByRole('tab',{name:'Parties',exact:true}).click();
+  await page.getByRole('tab',{name:'Balances',exact:true}).click();
   await page.getByLabel('Ledger status').selectOption('all');
   await page.getByLabel('Search names or references').fill('');
-  await page.getByRole('button',{name:'+ Add receivable',exact:true}).click();
+  await page.getByRole('button',{name:'+ Record money owed',exact:true}).click();
   await dialog.getByLabel('Owed by (person or company)').fill('Walk-in account');
   await dialog.getByLabel('Receivable type').selectOption('other');
   await dialog.getByLabel('Amount owed (₹)').fill('10');
   await dialog.getByLabel('Reference',{exact:true}).fill('Q-OPEN');
   await dialog.getByRole('button',{name:'Save receivable',exact:true}).click();
   await page.getByRole('button',{name:'View ledger for Walk-in account',exact:true}).waitFor();
-  assert.equal(await page.getByRole('tab',{name:'Parties',exact:true}).getAttribute('aria-selected'),'true');
+  assert.equal(await page.getByRole('tab',{name:'Balances',exact:true}).getAttribute('aria-selected'),'true');
   assert.deepEqual(errors,[]);
 });

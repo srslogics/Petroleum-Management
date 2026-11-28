@@ -35,25 +35,81 @@ function restoreManagerDraft(form,data){
     }
     if(list.children.length)list.closest('details')?.setAttribute('open','');
   }
+  if (fuelNames.some(fuel => form.elements['physical_' + fuel].value !== '')) {
+    form.elements['physical_' + fuelNames[0]].closest('details').open = true;
+  }
   form.syncEntries();
 }
 function showManagerEntry(active){
-  shell(`<div class="manager-heading"><div>${heading('Shift #'+active.id+' · '+businessDay(active.business_date),'Shift entries','Enter totals as you work. Review once before submitting.')}</div><div class="manager-draft"><span id="manager-save-status" role="status" aria-live="polite">Loading draft…</span><div class="workspace-actions"><button id="manager-import-figures" type="button" class="text-button">Import figures</button><button id="manager-read-document" type="button" class="text-button">Read receipt / challan</button><button id="manager-save-now" type="button" class="text-button">Save now</button><button id="manager-load-draft" type="button" class="text-button" hidden>Load saved draft</button></div></div></div>
-    <form id="close-shift" class="manager-entry-form"><div class="manager-entry-layout"><div class="manager-entry-main">
+  shell(`<div class="manager-heading">
+    ${heading('Shift #'+active.id+' · '+businessDay(active.business_date),'Shift entries','Enter meter readings and collection totals. Add deliveries or expenses when they occur.')}
+    <div class="manager-draft">
+      <span id="manager-save-status" role="status" aria-live="polite">Loading draft…</span>
+      <button id="manager-load-draft" type="button" class="text-button" hidden>Load saved draft</button>
+      <details class="manager-tools">
+        <summary>More tools</summary>
+        <div class="workspace-actions">
+          <button id="manager-import-figures" type="button" class="text-button">Import figures</button>
+          <button id="manager-read-document" type="button" class="text-button">Read receipt / challan</button>
+          <button id="manager-save-now" type="button" class="text-button">Save now</button>
+        </div>
+      </details>
+    </div>
+    </div>
+    <form id="close-shift" class="manager-entry-form">
     <nav class="manager-entry-tabs" aria-label="Entry sections">${[['meters','Meters & stock'],['collections','Collections'],['deliveries','Deliveries'],['expenses','Expenses']].map(([id,label],i)=>`<button id="manager-tab-${id}" type="button" class="${i?'':'selected'}" aria-controls="manager-panel-${id}" ${i?'':'aria-current="true"'} data-manager-tab="${id}">${label}</button>`).join('')}</nav>
     <section id="manager-panel-meters" class="card card-flow manager-panel"><header class="section-head"><div><h2>Meter readings</h2><p>Enter the current closing reading for each nozzle.</p></div></header><div class="nozzle-list">${active.nozzles.map(n=>`<div class="nozzle-row"><div><strong>${safe(n.code)}</strong> ${fuelTag(n.fuel)}<small>Opening ${volume(n.opening)} · ${money(active.rates[n.fuel])} / L</small><small id="sold-${n.id}">Sold —</small></div>${numberField(n.code+' closing reading (L)','closing_'+n.id,{step:'0.001',min:decimal(n.opening,1000),required:true})}</div>`).join('')}</div>
-    <div class="manager-stock"><h3>Physical closing stock <span class="quiet">(optional)</span></h3><div class="fuel-grid">${fuelNames.map(f=>numberField(f+' physical stock (L)','physical_'+f,{step:'0.001',placeholder:'Optional'})).join('')}</div></div></section>
-    <section id="manager-panel-collections" class="card card-flow manager-panel" hidden><header class="section-head"><div><h2>Collections</h2><p>Enter shift totals. No individual customer details are needed.</p></div></header><div class="field-grid">${Object.entries(managerMethods).map(([key,label])=>numberField(label+' collected (₹)',key)).join('')}${numberField('Actual cash counted (₹)','counted',{required:true})}</div><button id="manager-count-cash" type="button" class="secondary">Count cash by denomination</button>
+    <details class="manager-optional business-record"><summary><span>Physical closing stock (optional)</span></summary>
+      <div class="record-body fuel-grid">${fuelNames.map(f=>numberField(f+' physical stock (L)','physical_'+f,{step:'0.001',placeholder:'Optional'})).join('')}</div>
+    </details></section>
+    <section id="manager-panel-collections" class="card card-flow manager-panel" hidden><header class="section-head"><div><h2>Collections</h2><p>Enter the totals for the whole shift.</p></div></header><div class="field-grid">${Object.entries(managerMethods).map(([key,label])=>numberField(label+' collected (₹)',key)).join('')}${numberField('Actual cash counted (₹)','counted',{required:true})}</div><button id="manager-count-cash" type="button" class="secondary">Count cash by denomination</button>
     <details class="manager-optional business-record"><summary><span>Payment batch references (optional)</span></summary><div class="record-body"><p class="quiet">Use totals above, or enter every batch for a method here. Batch entries replace that method’s total.</p>${entrySection('payments','Payment batches','Cash, UPI or card batches only.')}</div></details></section>
     <section id="manager-panel-deliveries" class="card card-flow manager-panel" hidden><header class="section-head"><div><h2>Fuel deliveries</h2><p>Enter total litres delivered, or add each delivery below.</p></div></header><div class="fuel-grid">${fuelNames.map(f=>numberField(f+' delivered (L)','delivery_'+f,{step:'0.001'})).join('')}</div><details class="manager-optional business-record"><summary><span>Supplier and challan details (optional)</span></summary><div class="record-body">${entrySection('deliveries','Delivery entries','Detailed entries replace the total for that fuel.')}</div></details></section>
     <section id="manager-panel-expenses" class="card card-flow manager-panel" hidden><header class="section-head"><div><h2>Till expenses</h2><p>Record only expenses paid from this shift’s cash.</p></div></header>${numberField('Till expenses (₹)','expenses')}<label>Expense note (optional)<textarea name="expense_note" maxlength="250" rows="2"></textarea></label><details class="manager-optional business-record"><summary><span>Individual expenses (optional)</span></summary><div class="record-body">${entrySection('expenses','Expense entries','Detailed entries replace the expense total.')}</div></details><label>Shift note (optional)<textarea name="shift_note" maxlength="1000" rows="3" placeholder="Anything the owner should know"></textarea></label></section>
-    </div><aside class="card card-flow reconciliation manager-totals"><h2>Shift totals</h2><dl class="key-values"><div><dt>Metered sales</dt><dd id="metered">—</dd></div><div><dt>Cash + UPI + card</dt><dd id="collections-total">—</dd></div><div><dt>Collections − sales</dt><dd id="collections-diff">—</dd></div></dl><p class="form-help">The owner handles credit and reconciles any difference.</p><dl class="key-values"><div><dt>Cash collected</dt><dd id="cash">—</dd></div><div><dt>Till expenses</dt><dd id="expenses">—</dd></div><div><dt>Expected cash</dt><dd id="expected">—</dd></div><div><dt>Counted cash</dt><dd id="counted">—</dd></div></dl><div class="result"><div><strong>Cash difference</strong><small>Counted − expected</small></div><output id="variance">—</output></div>${errorbox}<button class="primary">Review entries</button><p class="quiet submit-help">Reviewing won’t submit or lock your entries.</p></aside></div>
+    <div class="manager-entry-actions">
+      ${errorbox}
+      <button id="manager-next" type="button" class="primary">Continue to collections</button>
+      <button id="manager-review" class="primary" hidden>Review entries</button>
+    </div>
+    <details class="card manager-totals"><summary>See shift totals</summary>
+      <div class="manager-totals-body">
+        <dl class="key-values"><div><dt>Metered sales</dt><dd id="metered">—</dd></div><div><dt>Cash + UPI + card</dt><dd id="collections-total">—</dd></div><div><dt>Collections − sales</dt><dd id="collections-diff">—</dd></div></dl>
+        <dl class="key-values"><div><dt>Cash collected</dt><dd id="cash">—</dd></div><div><dt>Till expenses</dt><dd id="expenses">—</dd></div><div><dt>Expected cash</dt><dd id="expected">—</dd></div><div><dt>Counted cash</dt><dd id="counted">—</dd></div></dl>
+        <div class="result"><div><strong>Cash difference</strong><small>Counted − expected</small></div><output id="variance">—</output></div>
+      </div>
+    </details>
     <dialog id="manager-cash-dialog" aria-labelledby="manager-cash-title"><header class="money-dialog-header"><h2 id="manager-cash-title">Count cash</h2><button id="manager-cash-close" class="text-button" type="button" aria-label="Close cash counter">✕</button></header><div class="money-dialog-body"><div class="manager-cash-grid">${managerDenominations.map(value=>`<label>₹${value} × quantity<input name="cash_count_${value}" type="number" inputmode="numeric" step="1" min="0" max="1000000" placeholder="0"></label>`).join('')}</div>${numberField('Other cash (₹)','cash_count_other')}<div class="outgoing-net" id="manager-cash-total">₹0.00</div><button id="manager-cash-apply" type="button" class="primary">Use counted total</button><p class="form-error" role="alert" id="manager-cash-error"></p></div></dialog></form>
     <dialog id="money-dialog" aria-labelledby="money-dialog-title"></dialog>`);
   const form=document.querySelector('#close-shift');
   bindManagerEntries(form,active);
-  const select=id=>{for(const button of document.querySelectorAll('[data-manager-tab]')){const current=button.dataset.managerTab===id;button.classList.toggle('selected',current);if(current)button.setAttribute('aria-current','true');else button.removeAttribute('aria-current');document.querySelector('#manager-panel-'+button.dataset.managerTab).hidden=!current;}};
-  document.querySelectorAll('[data-manager-tab]').forEach(button=>button.addEventListener('click',()=>select(button.dataset.managerTab)));
+  const nextButton = document.getElementById('manager-next');
+  const reviewButton = document.getElementById('manager-review');
+  const tabs = form.querySelectorAll('[data-manager-tab]');
+  const select = id => {
+    for (const button of tabs) {
+      const current = button.dataset.managerTab === id;
+      button.classList.toggle('selected', current);
+      if (current) button.setAttribute('aria-current', 'true');
+      else button.removeAttribute('aria-current');
+      document.getElementById('manager-panel-' + button.dataset.managerTab).hidden = !current;
+    }
+    nextButton.hidden = id !== 'meters';
+    reviewButton.hidden = id === 'meters';
+  };
+  tabs.forEach(button => button.addEventListener('click', () => select(button.dataset.managerTab)));
+  const continueToCollections = () => {
+    for (const input of form.querySelectorAll('#manager-panel-meters input')) {
+      if (!input.reportValidity()) return;
+    }
+    select('collections');
+    document.getElementById('manager-tab-collections').focus();
+  };
+  nextButton.addEventListener('click', continueToCollections);
+  form.querySelector('#manager-panel-meters').addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.target.tagName !== 'INPUT') return;
+    event.preventDefault();
+    continueToCollections();
+  });
   let handlingInvalid=false;
   form.addEventListener('invalid',event=>{if(handlingInvalid){event.preventDefault();return;}handlingInvalid=true;setTimeout(()=>handlingInvalid=false,0);const panel=event.target.closest('.manager-panel');if(event.target.closest('#manager-cash-dialog')&&!document.querySelector('#manager-cash-dialog').open)document.querySelector('#manager-cash-dialog').showModal();if(panel){select(panel.id.replace('manager-panel-',''));const details=event.target.closest('details');if(details)details.open=true;}},true);
   const saved=active.draft||{version:0,data:null};
@@ -88,7 +144,10 @@ function bindShiftDraft(form,active,saved,dirty,localConflict=false){
     inFlight=(async()=>{try{
       const result=await api('/shifts/'+active.id+'/draft',{version,data:JSON.parse(data)});
       version=result.version;changed=capture()!==data;if(!stopped)mirror();message(changed?'Unsaved changes':'Saved '+timestamp(result.saved_at));
-    }catch(error){failed=true;if(error.status===409){conflict=true;if(!stopped)mirror();if(!stopped)document.querySelector('#manager-load-draft')?.removeAttribute('hidden');message('Draft changed elsewhere. Load saved draft to continue.');}else message(canMirror?'Not saved online · kept in this tab. Retry save.':'Not saved. Keep this page open and retry.');
+    }catch(error){failed=true;if(error.status===409){conflict=true;if(!stopped)mirror();if(!stopped)document.querySelector('#manager-load-draft')?.removeAttribute('hidden');message('Draft changed elsewhere. Load saved draft to continue.');} else {
+        if (!stopped) document.querySelector('.manager-tools').open = true;
+        message(canMirror ? 'Not saved online · kept in this tab. Retry save.' : 'Not saved. Keep this page open and retry.');
+      }
     }finally{inFlight=null;}})();
     await inFlight;if(changed&&!failed&&!conflict&&!stopped)timer=setTimeout(save,1500);
   };
@@ -124,7 +183,7 @@ function showManagerReview(form,active,draft){
   const reviewRows=active.nozzles.map(n=>`<tr><th scope="row">${safe(n.code)}</th><td>${volume(n.opening)}</td><td>${volume(Math.round(Number(payload.closings[n.id])*1000))}</td></tr>`).join('');
   const entries=Object.fromEntries(Object.entries(payload.entries).map(([category,rows])=>[category,rows.map(r=>({...r,...(category==='deliveries'?{quantity:Math.round(Number(r.quantity)*1000)}:{amount:Math.round(Number(r.amount)*100)})}))]));
   moneyDialog('Review shift entries',`<p class="money-dialog-intro">Shift #${active.id} · ${safe(businessDay(active.business_date))}. Check these figures before locking the shift.</p><div class="table-scroll"><table class="manager-review-table"><thead><tr><th>Nozzle</th><th>Opening</th><th>Closing</th></tr></thead><tbody>${reviewRows}</tbody></table></div><dl class="money-entry-details">${Object.entries(managerMethods).map(([key,label])=>`<div><dt>${label} collected</dt><dd>${money(amounts[key])}</dd></div>`).join('')}<div><dt>Till expenses</dt><dd>${money(expenses)}</dd></div><div><dt>Counted cash</dt><dd>${money(counted)}</dd></div><div><dt>Cash difference</dt><dd>${money(counted-amounts.cash+expenses)}</dd></div>${fuelNames.map(f=>`<div><dt>${f} delivered</dt><dd>${volume(Math.round(Number(payload.deliveries[f]||0)*1000))}</dd></div><div><dt>${f} physical stock</dt><dd>${payload.physical[f]===''?'Not entered':volume(Math.round(Number(payload.physical[f])*1000))}</dd></div>`).join('')}</dl>${payload.expense_note?`<h3>Expense note</h3><p>${safe(payload.expense_note)}</p>`:''}${recordedEntries(entries,payload.shift_note)}<form id="manager-final-submit" class="money-form"><p class="money-form-hint">Credit and collection differences are handled by the owner. Submission locks your entries.</p>${errorbox}<button class="primary">Submit shift closing</button><button id="manager-edit-entries" type="button" class="secondary">Back to entries</button></form>`,true);
-  listen('manager-edit-entries',()=>{document.querySelector('#money-dialog').close();form.querySelector('button.primary').focus();});
+  listen('manager-edit-entries',()=>{document.querySelector('#money-dialog').close();form.querySelector('button.primary:not([hidden])').focus();});
   bindForm('manager-final-submit',async()=>{
     if(draft.conflicted())throw Error('This draft changed elsewhere. Go back and load the saved draft before submitting.');
     await draft.save();

@@ -1,17 +1,12 @@
 "use strict";
 
 function businessOverview(data) {
-  const count = data.exceptions_count;
   const balance = data.customer_balance + data.market_balance;
   return `<section class="owner-control-summary" aria-label="Current operations and balances">
     <button id="overview-operations" type="button" class="overview-action" aria-label="View operations">
       <span class="action-label">${navigationIcon('operations')} Current shift</span>
       <strong>${data.active ? 'Shift #' + data.active.id : 'No active shift'}</strong>
-      <span class="action-detail">${data.active ? `${safe(data.active.opener)} · ${data.active.hours}h open${data.active.overdue ? ' · Overdue' : ''}` : 'Ready when your team is'}<span aria-hidden="true">↗</span></span>
-    </button>
-    <button id="overview-exceptions" type="button" class="overview-action ${count ? 'needs-attention' : ''}" aria-label="${count} exceptions need attention">
-      <span class="action-label">${navigationIcon('exceptions')} Exceptions</span><strong>${count ? count + ' to check' : 'All clear'}</strong>
-      <span class="action-detail">${count ? 'All dates · Open the inbox' : 'All dates · No open issues'}<span aria-hidden="true">↗</span></span>
+      <span class="action-detail">${data.active ? `${safe(data.active.opener)} · ${data.active.hours}h open${data.active.overdue ? ' · Overdue' : ''}` : 'View station operations'}<span aria-hidden="true">↗</span></span>
     </button>
     <button id="overview-money" type="button" class="overview-action" aria-label="To collect ${money(balance)}">
       <span class="action-label">${navigationIcon('money')} To collect</span><strong>${money(balance)}</strong>
@@ -21,7 +16,7 @@ function businessOverview(data) {
 }
 
 function bindBusinessOverview() {
-  for (const view of ['operations', 'exceptions', 'money']) listen('overview-' + view, () => openBusiness(view));
+  for (const view of ['operations', 'money']) listen('overview-' + view, () => openBusiness(view));
 }
 
 const businessText = (label, name, required = true, limit = 150) => `<label>${label}<input name="${name}" ${required ? 'required' : ''} maxlength="${limit}"></label>`;

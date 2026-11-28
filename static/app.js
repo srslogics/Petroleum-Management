@@ -589,7 +589,7 @@ function bindDateFilter(endpoint, render) {
       const updated = await api(ownerDatePath(endpoint, date));
       if (!isCurrent()) return;
       render(updated);
-      document.getElementById(source)?.focus({ preventScroll: true });
+      (document.getElementById(source) || document.getElementById("date"))?.focus({ preventScroll: true });
     } catch (error) {
       if (!isCurrent()) return;
       control.value = selectedDate;
@@ -603,7 +603,7 @@ function bindDateFilter(endpoint, render) {
     }
   };
   listen("date", () => update(), "change");
-  listen("date-today", () => {
+  if (document.getElementById("date-today")) listen("date-today", () => {
     control.value = ownerToday();
     return update("date-today");
   });
@@ -622,8 +622,7 @@ function showOwner(data) {
   shell(`<div class="dashboard-heading">
     ${heading("", "Station overview")}
     <div class="report-controls"><label class="date-control">Business date<input id="date" type="date" value="${safe(data.date)}"></label>
-      <button id="date-today" class="secondary" type="button">Today</button>
-      <button id="open-daily-report" class="primary" type="button">Open daily report ${icon("arrow")}</button></div>
+      ${data.date !== ownerToday() ? '<button id="date-today" class="secondary" type="button">Today</button>' : ''}</div>
   </div>
   ${missingRates || needsOpeningStock ? `<section class="setup-notice" aria-label="First-shift setup"><span class="setup-icon">${icon("warning")}</span>
     <div><strong>Set up your first shift</strong>
@@ -632,12 +631,20 @@ function showOwner(data) {
       ${missingRates ? '<button id="setup-rates" class="secondary" type="button">Set fuel rates</button>' : ""}
       ${needsOpeningStock ? '<button id="setup-stock" class="secondary" type="button">Confirm opening stock</button>' : ""}
     </div></section>` : ""}
-  <section class="owner-quick-actions" aria-label="Quick actions">
-    <button id="quick-customer" class="secondary" type="button">${navigationIcon("money")} Add customer</button>
-    <button id="quick-bill" class="secondary" type="button">${navigationIcon("payables")} Add bill</button>
-    <button id="quick-salary" class="secondary" type="button">${navigationIcon("payroll")} Add salary</button>
-  </section>
   <div class="owner-layout">
+    <section class="attention-surface" aria-label="Needs attention">
+      <h2>Needs attention</h2>
+      ${pending || business.exceptions_count ? `<div class="owner-attention-list">
+        ${pending ? `<button id="review-next-shift" class="owner-task" type="button">
+          <span><strong>${pending} ${pending === 1 ? 'shift' : 'shifts'} awaiting review</strong><small>${businessDay(data.date)}</small></span>
+          ${icon("arrow")}
+        </button>` : ''}
+        ${business.exceptions_count ? `<button id="overview-exceptions" class="owner-task" type="button">
+          <span><strong>${business.exceptions_count} open ${business.exceptions_count === 1 ? 'issue' : 'issues'}</strong><small>Across all dates</small></span>
+          ${icon("arrow")}
+        </button>` : ''}
+      </div>` : '<p>No shifts to review for this date and no open issues.</p>'}
+    </section>
     <section class="sales-surface" aria-label="Daily fuel sales">
       <div class="sales-head"><h2>Fuel sales</h2><span class="sales-period">${businessDay(data.date)}</span></div>
       <strong class="sales-amount">${money(totalSales)}</strong>
@@ -648,19 +655,18 @@ function showOwner(data) {
           <span>${volume(sales.litres)} sold</span><small>Selling rate ${data.setup.fuels[fuel].rate ? money(data.setup.fuels[fuel].rate) + " / L" : "not configured"}</small></div>`;
       }).join("")}</div>
     </section>
-    <section class="attention-surface" aria-label="Shift review">
-      <h2>Shift review</h2>
-      <strong class="review-number">${pending}<span>awaiting review</span></strong>
-      ${pending ? "" : `<p>${data.shifts.length ? "All submitted shifts have been reviewed." : "Submitted shifts will appear here for review."}</p>`}
-      <dl class="review-breakdown"><div><dt>Submitted</dt><dd>${data.shifts.length}</dd></div>
-        <div><dt>Reviewed</dt><dd>${data.shifts.length - pending}</dd></div>
-        <div><dt>Cash differences</dt><dd>${data.shifts.filter(shift => shift.cash_difference !== 0).length} shifts</dd></div></dl>
-      ${pending ? '<button id="review-next-shift" class="primary owner-review-next" type="button">Review next shift ' + icon("arrow") + '</button>' : ""}
-    </section>
     ${businessOverview(business)}
-    <div class="ledger-sheet owner-submitted">
+    <section class="owner-quick-actions" aria-label="Quick actions">
+      <h2>Quick actions</h2>
+      <div>
+        <button id="quick-customer" class="secondary" type="button">${navigationIcon("money")} Add customer</button>
+        <button id="quick-bill" class="secondary" type="button">${navigationIcon("payables")} Add bill</button>
+        <button id="quick-salary" class="secondary" type="button">${navigationIcon("payroll")} Add salary</button>
+      </div>
+    </section>
+    <details class="ledger-sheet owner-submitted" id="submitted-shifts">
+      <summary><span id="shift-heading">Submitted shifts</span><small>${data.shifts.length} for this date</small></summary>
       <section class="ledger-section">
-        <header class="section-head"><h2 id="shift-heading">Submitted shifts</h2></header>
         ${data.shifts.length ? `<div class="table-scroll" role="region" aria-labelledby="shift-heading" tabindex="0">
           <table class="shift-table" role="table">
           <thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Shift / submitted by</th><th scope="col" role="columnheader">Submitted at</th><th scope="col" role="columnheader" class="numeric">Metered sales</th>
@@ -674,7 +680,7 @@ function showOwner(data) {
             <td role="cell" class="shift-report-action"><button class="row-action" id="shift-${shift.id}" type="button" aria-label="Open shift ${shift.id} report"><span class="shift-mobile-label">Open shift</span>${icon("arrow")}</button></td>
           </tr>`).join("")}</tbody>
         </table></div>` : '<div class="shift-empty">' + icon("receipt") + '<strong>No submitted shifts yet</strong><p>Once a manager closes a shift, its sales and reconciliation will appear here.</p></div>'}
-      </section></div>
+      </section></details>
     <section class="inventory-surface">
       <header class="section-head"><div><h2>Fuel inventory</h2><p>Book stock through the latest submitted shift</p></div></header>
       <div class="inventory-grid">${fuelNames.map(fuel => {
@@ -699,10 +705,10 @@ function showOwner(data) {
   listen("quick-bill", () => openOutgoings("payables", outgoingBillForm));
   listen("quick-salary", () => openOutgoings("payroll", outgoingSalaryForm));
   if (pending) listen("review-next-shift", () => openShiftReport(Math.min(...waiting.map(shift => shift.id))));
+  if (business.exceptions_count) listen("overview-exceptions", () => openBusiness("exceptions"));
   if (missingRates) listen("setup-rates", openSettings);
   if (needsOpeningStock) listen("setup-stock", () => openOpeningStock(data.setup));
   bindDateFilter("/dashboard", showOwner);
-  listen("open-daily-report", openDailyReport);
   for (const shift of data.shifts) {
     listen("shift-" + shift.id, () => openShiftReport(shift.id));
   }
