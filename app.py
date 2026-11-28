@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 from automation import AUTOMATION_SCHEMA, Automation, accept_feed
 from security import Throttle, client_address
 from contacts import CONTACTS_SCHEMA, contacts_route
+from financial import FINANCIAL_SCHEMA, financial_queries, journal_route, ledger_report, validate_fuel_payment
 from mfa import MFA, MFA_SCHEMA, mfa_cipher
 from manager_drafts import DRAFT_SCHEMA, draft_route, draft_query, unpack_draft
 from outgoings import OUTGOING_SCHEMA, Ledger, outgoing_route
@@ -177,7 +178,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 );
 """
 
-SCHEMA += OUTGOING_SCHEMA + DRAFT_SCHEMA + AUTOMATION_SCHEMA + MFA_SCHEMA + CONTACTS_SCHEMA
+SCHEMA += OUTGOING_SCHEMA + DRAFT_SCHEMA + AUTOMATION_SCHEMA + MFA_SCHEMA + CONTACTS_SCHEMA + FINANCIAL_SCHEMA
 
 STATIC_FILES = {
     "/theme.css": "text/css",
@@ -956,12 +957,12 @@ def business_state(db, sid, *, in_write=False, results=None):
     def issue(key, kind, message, signature, shift_id=None):
         exceptions.append({"key": key, "kind": kind, "message": message, "signature": str(signature), "shift_id": shift_id})
 
-    def receivable(source, method, expected, label):
+    def receivable(source, method, expected, label, available_on):
         records = bank_by_source.get((source, method), [])
         gross = sum(item["amount"] + item["fees"] for item in records)
         settlements.append({"source": source, "method": method, "label": label, "expected": expected,
                             "banked": sum(item["amount"] for item in records), "fees": sum(item["fees"] for item in records),
-                            "remaining": expected - gross, "records": records})
+                            "remaining": expected - gross, "records": records, "available_on": available_on})
 
     for row in shifts:
         if not row["submitted_at"]:
@@ -1002,7 +1003,7 @@ def business_state(db, sid, *, in_write=False, results=None):
         for method in ("upi", "card", "cash"):
             expected = max(0, payload["counted"]) if method == "cash" else payload["collections"][method]
             if expected:
-                receivable(f"shift:{shift_id}", method, expected, f"Shift #{shift_id} · {row['business_date']}")
+                receivable(f"shift:{shift_id}", method, expected, f"Shift #{shift_id} · {row['business_date']}", row["business_date"])
     for row in repayments:
         item = customers.get(row["customer_key"])
         if item is None:
@@ -1011,7 +1012,7 @@ def business_state(db, sid, *, in_write=False, results=None):
         item["transactions"].append({"date": row["paid_on"], "type": "Repayment", "amount": -row["amount"],
                                      "reference": row["reference"], "note": row["note"], "actor": row["actor"]})
         if row["method"] == "cash":
-            receivable(f"repayment:{row['id']}", "cash", row["amount"], f"Cash repayment · {item['name']} · {row['paid_on']}")
+            receivable(f"repayment:{row['id']}", "cash", row["amount"], f"Cash repayment · {item['name']} · {row['paid_on']}", row["paid_on"])
     today = now()[:10]
     market_by_id = {row["id"]: dict(row) | {"received": 0, "void": void_lookup.get(("market-due", row["id"]))} for row in market}
     market_history = [dict(row) | {"void": void_lookup.get(("market-receipt", row["id"]))} for row in market_receipts]
@@ -1021,7 +1022,7 @@ def business_state(db, sid, *, in_write=False, results=None):
             continue
         item["received"] += row["amount"]
         if row["method"] == "cash":
-            receivable(f"market-receipt:{row['id']}", "cash", row["amount"], f"Cash received · {item['party']} · {row['paid_on']}")
+            receivable(f"market-receipt:{row['id']}", "cash", row["amount"], f"Cash received · {item['party']} · {row['paid_on']}", row["paid_on"])
     for item in market_by_id.values():
         item["balance"] = 0 if item["void"] else item["amount"] - item["received"]
         item["overdue"] = bool(item["balance"] > 0 and item["due_date"] and item["due_date"] < today)
@@ -1245,6 +1246,8 @@ def owner_control_route(db, user, method, route, body):
                     paid_on = business_date(body.get("paid_on"))
                     if paid_on > now()[:10]:
                         fail("A repayment cannot be recorded in the future.")
+                    if not validate_fuel_payment(db, sid, state, key, paid_on, amount):
+                        fail("This payment date would use fuel credit that was not yet available. Use the actual receipt date.", 409)
                     sql = "INSERT INTO repayments(station_id, customer_key, amount, method, paid_on, reference, note, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
                     params = (sid, key, amount, body["method"], paid_on, reference, message, user["id"], now())
                 else:
@@ -1261,6 +1264,8 @@ def owner_control_route(db, user, method, route, body):
                     bank_date = business_date(body.get("bank_date"))
                     if bank_date > now()[:10]:
                         fail("A bank receipt cannot be recorded in the future.")
+                    if bank_date < target["available_on"]:
+                        fail("A bank receipt cannot predate the underlying shift or cash receipt.")
                     sql = "INSERT INTO bank_records(station_id, source, method, amount, fees, bank_date, reference, note, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                     params = (sid, source, method_name, amount, fees, bank_date, reference, message, user["id"], now())
                 try:
@@ -1514,17 +1519,30 @@ class Request:
                 state = business_state(db, user["station_id"])
                 return {key: state[key] for key in ("settlements", "bank_records", "today")}
             if method == "GET" and route == "/business/ledger":
+                sid = user["station_id"]
+                today = now()[:10]
+                raw_date = parse_qs(self.environ.get("QUERY_STRING", ""), keep_blank_values=True).get("as_of", [today])[0]
+                cutoff = business_date(raw_date, "the statement date")
+                if cutoff > today:
+                    fail("Choose a statement date up to today.")
                 ledger = Ledger(db, user, now, fail, number, note)
-                incoming_queries = business_queries(user["station_id"])
-                snapshot = read_snapshot(db, [*incoming_queries, *ledger.state_queries()])
-                boundary = len(incoming_queries)
-                incoming = business_state(db, user["station_id"], results=snapshot[:boundary])
-                outgoing = ledger.state(rows=snapshot[boundary:])
+                incoming_queries = business_queries(sid)
+                outgoing_queries = ledger.state_queries()
+                snapshot = read_snapshot(db, [*incoming_queries, *outgoing_queries, *financial_queries(sid)[1:]])
+                split = len(incoming_queries)
+                end = split + len(outgoing_queries)
+                incoming = business_state(db, sid, results=snapshot[:split])
+                outgoing = ledger.state(rows=snapshot[split:end])
+                shifts = [row for row in snapshot[0] if row["submitted_at"]]
                 keys = ("customers", "repayments", "market_receivables", "market_receipts", "unallocated_credit", "today")
                 return {key: incoming[key] for key in keys} | {
                     "bills": outgoing["bills"],
                     "bill_payments": [entry for entry in outgoing["entries"] if entry["kind"] == "bill"],
+                    "financial": ledger_report(incoming, outgoing, [shifts, *snapshot[end:]], cutoff),
                 }
+            if method == "POST" and route in ("/ledger/journals", "/ledger/journals/reverse"):
+                return journal_route(db, user, route, data, now=now, fail=fail, business_date=business_date,
+                                     number=number, required_note=required_note)
             if method == "GET" and route == "/business/money":
                 sid = user["station_id"]
                 *rows, pending = read_snapshot(db, [*business_queries(sid), pending_credit_query(sid)])

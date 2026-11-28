@@ -177,7 +177,11 @@ Inter Variable 5.3.0 is bundled in `static/fonts` under the adjacent SIL Open Fo
 
 **Receivables** shows the total owed to the station, split into fuel credit and other dues. Existing customer accounts, statements and credit allocation are under **Fuel credit**. Use **Add receivable** for unpaid invoices, supplier refunds, loans or advances to recover, reimbursements, opening balances and other amounts owed. Open a receivable to record partial or full payments. Due dates feed the overdue total and the exception inbox.
 
-**Ledger** brings fuel credit, other receivables and bills into one view by person or business. Each account shows what the station needs to collect and pay, with separate running balances and the transaction history for both. Receivables and Payables are the entry workspaces.
+**Ledger** is the Owner accounting workspace. **Parties** shows what each person or business owes and what the station owes them. **Journal** shows the debit and credit lines behind each posting. **Trial balance** shows the debit or credit balance for each account. The selected **As of date** applies to all three views and their CSV exports. Recorded adjustments produce reversals dated on the day of the correction, leaving the original posting visible.
+
+Submitted shifts, outstanding dues, supplier bills, payments, bank settlements, cash deposits and payroll create balanced postings from their source records. Matching an outgoing payment to bank evidence does not post it again. New fuel repayments must fit the available balance on their date and on later dates. Opening receivables and opening payables retain the party balances without creating current income or expenses.
+
+Use **Journal entry** for opening amounts, account adjustments, and valuation supported by purchase costs. Bills are initially debited to **Bills to classify** so the owner or accountant can allocate them to inventory, expenses or assets. The station records fuel quantities independently of their cost. Book inventory valuation and cost of sales with the corresponding journal entries. Review the collection and cash difference clearing accounts before closing the books.
 
 **Contacts** saves names and optional WhatsApp numbers for the station. The same directory supplies name suggestions in owner money, bill and staff entry forms. WhatsApp opens a draft with the saved number when available. Owners can also save or update a contact from the party ledger.
 

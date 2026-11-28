@@ -212,3 +212,21 @@
   .ledger-balances { gap: 8px; }
   .ledger-balances > div { padding: 10px; }
 }
+
+.ledger-date-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin: 0 0 20px; }
+.ledger-date-form .form-error:empty { display: none; }
+.ledger-date-form .form-error { flex-basis: 100%; }
+.ledger-account-note { color: var(--muted); padding: 14px 22px; border-top: 1px solid var(--line); }
+.journal-list { list-style: none; margin: 0; padding: 0; }
+.journal-list > li { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 22px; border-top: 1px solid var(--line); }
+.journal-list small { display: block; color: var(--muted); font-size: var(--text-meta); }
+.journal-amount { flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
+#trial-balance-table tfoot { background: var(--surface); }
+#trial-balance-table tfoot :is(th,td) { padding: 14px 22px; }
+.journal-line { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 10px; }
+.journal-line .money-form-grid { margin: 10px 0; }
+#manual-journal-reverse { margin-top: 16px; }
+@media (max-width: 760px) {
+  #trial-balance-table .money-table :is(th,td) { padding-inline: 8px; }
+  .ledger-account-note, .journal-list > li { padding-inline: 16px; }
+}

@@ -603,8 +603,8 @@ class HostedTest(unittest.TestCase):
             "closings":{"1":1,"2":0}, "collections":{"upi":50}, "counted":0,
             "entries":{"payments":[{"method":"credit","amount":50,"party":"Hosted Fleet"}]},
         })
-        request("/api/owner/repayments", {"customer_key":"hosted fleet", "amount":10, "method":"bank", "paid_on":"2026-11-22", "reference":"HOSTED-R"})
-        request("/api/owner/bank-records", {"source":f"shift:{shift['id']}", "method":"upi", "amount":49, "fees":1, "bank_date":"2026-11-22", "reference":"HOSTED-B"})
+        request("/api/owner/repayments", {"customer_key":"hosted fleet", "amount":10, "method":"bank", "paid_on":shift["business_date"], "reference":"HOSTED-R"})
+        request("/api/owner/bank-records", {"source":f"shift:{shift['id']}", "method":"upi", "amount":49, "fees":1, "bank_date":shift["business_date"], "reference":"HOSTED-B"})
         request(f"/api/owner/shifts/{shift['id']}/corrections", {"reason":"Confirm reference"})
         restarted = Browser(create_app(env=self.env), "pump.onrender.com", "https://pump.onrender.com")
         restarted.cookies = browser.cookies.copy()
@@ -614,6 +614,12 @@ class HostedTest(unittest.TestCase):
         self.assertEqual(state["settlements"][0]["remaining"], 0)
         self.assertEqual(state["tanks"]["Petrol"]["capacity"], 10000000)
         self.assertEqual(state["corrections"][0]["reason"], "Confirm reference")
+        status, account = restarted.request("/api/owner/business/ledger?as_of=" + shift["business_date"])
+        self.assertEqual(status, 200, account)
+        financial = account["financial"]
+        self.assertEqual(financial["total_debit"], financial["total_credit"])
+        trial = {line["code"]: line for line in financial["trial"]}
+        self.assertEqual((trial["1100"]["debit"], trial["1010"]["debit"], trial["5300"]["debit"]), (4000, 5900, 100))
 
     def test_hosted_automation_batches_and_approvals(self):
         database = TursoDatabase.from_env(self.env, required=True)

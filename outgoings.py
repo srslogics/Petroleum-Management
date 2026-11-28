@@ -5,6 +5,7 @@ from contextlib import nullcontext
 import sqlite3
 from datetime import date
 from database import execute_many, read_snapshot, transaction
+from financial import dated_reduction_fits, outgoing_postings, salary_date
 
 OUTGOING_SCHEMA = """
 CREATE TABLE IF NOT EXISTS payroll_staff (
@@ -152,8 +153,8 @@ class Ledger:
                     advance_applied=applied, due_date=due, note=self.text(body, 'note', False, 500)))
             elif route == '/payables/bills':
                 kind = body.get('kind')
-                if kind not in ('supplier', 'other'):
-                    self.fail('Choose supplier or other bill.')
+                if kind not in ('supplier', 'other', 'opening'):
+                    self.fail('Choose supplier bill, other bill or opening payable.')
                 payee, reference = self.text(body, 'payee'), self.text(body, 'reference')
                 bill_date, due = self.day(body, 'bill_date', True), self.day(body, 'due_date')
                 if due < bill_date:
@@ -171,8 +172,8 @@ class Ledger:
                     target = self.find(state, 'salaries' if kind == 'salary' else 'bills', body.get('source_id'))
                     if target['voided_at'] or amount > target['balance']:
                         self.fail('Payment exceeds the remaining balance.', 409)
-                    if paid_on < (target['period'] + '-01' if kind == 'salary' else target['bill_date']):
-                        self.fail('Payment date is before the salary month or bill date.')
+                    if paid_on < (salary_date(target) if kind == 'salary' else target['bill_date']):
+                        self.fail('Payment date is before the salary accrual or bill date.')
                     if kind == 'salary':
                         salary_id, staff_id = target['id'], target['staff_id']
                     else:
@@ -182,8 +183,11 @@ class Ledger:
                     staff_id = target['id']
                     if kind == 'advance' and not target['active']:
                         self.fail('This staff member is inactive.', 409)
-                    if kind == 'advance_return' and amount > target['advance_balance']:
-                        self.fail('Return exceeds the outstanding advance.', 409)
+                    if kind == 'advance_return':
+                        if amount > target['advance_balance']:
+                            self.fail('Return exceeds the outstanding advance.', 409)
+                        if not dated_reduction_fits(outgoing_postings(state), "1130", paid_on, amount, staff_id=staff_id):
+                            self.fail('This return date would use a staff advance that was not yet available.', 409)
                 method = body.get('method')
                 if method not in ('cash', 'bank'):
                     self.fail('Choose cash or bank.')
