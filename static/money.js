@@ -319,24 +319,34 @@ function filterMarketRows() {
   }
 }
 
-function openMarketForm(data, name = '', kind = '') {
+function openMarketForm(data, name = '', kind = 'other') {
   const view = document.getElementById('main-content').dataset.view;
-  moneyDialog('Record money owed', `<form id="market-receivable-form" class="money-form">
-    ${contactNameField('Owed by (person or company)', 'party', name, {knownNames: data.market_receivables.map(item => item.party)})}
-    <div><label for="market-kind">Receivable type</label><select id="market-kind" name="kind" required><option value="">Choose a type</option>${moneyOptions(Object.entries(marketKinds), kind)}</select></div>
-    ${numberField('Amount owed (₹)', 'amount', {min: 0.01, required: true})}
-    <div class="money-form-grid">${businessDate('Date owed', 'recorded_on', data.today)}${businessDate('Due date (optional)', 'due_date', '', false)}</div>
-    ${businessText('Reference', 'reference')}
-    ${businessNote('Description (optional)')}
-    ${errorbox}<button class="primary">Save receivable</button>
-  </form>`);
-  bindForm('market-receivable-form', async form => {
-    await api('/receivables', fields(form));
+  const reference = 'DUE-' + Array.from(crypto.getRandomValues(new Uint8Array(8)),
+    byte => byte.toString(16).padStart(2, '0')).join('').toUpperCase();
+  moneyDialog(kind === 'opening' ? 'Record opening balance' : 'Record money owed',
+    `<form id="market-receivable-form" class="money-form">
+      ${contactNameField('Who owes you?', 'party', name, {knownNames: data.market_receivables.map(item => item.party)})}
+      ${numberField('Amount (₹)', 'amount', {min: 0.01, required: true})}
+      <details class="money-optional receivable-details">
+        <summary>More details</summary>
+        <div><label for="market-kind">Reason</label><select id="market-kind" name="kind">${moneyOptions(Object.entries(marketKinds), kind)}</select></div>
+        <div class="money-form-grid">${businessDate('Date owed', 'recorded_on', data.today)}${businessDate('Due date (optional)', 'due_date', '', false)}</div>
+        ${businessText('Reference (optional)', 'reference', false)}
+        ${businessNote('Note (optional)')}
+      </details>
+      ${errorbox}<button class="primary">Save</button>
+    </form>`);
+  const form = bindForm('market-receivable-form', async form => {
+    const values = fields(form);
+    await api('/receivables', {...values, reference: values.reference.trim() || reference});
     if (view === 'money') Object.assign(moneyView, {tab: 'market', marketSearch: '', marketFilter: 'outstanding'});
     await openBusiness(view);
-    showBusinessNotice('Receivable added.');
+    showBusinessNotice('Money owed recorded.');
     document.getElementById('money-tab-market')?.focus({preventScroll: true});
   });
+  const details = form.querySelector('details');
+  details.addEventListener('invalid', () => { details.open = true; }, true);
+  if (name) form.elements.amount.focus();
 }
 
 function openMarketDetail(data, item) {

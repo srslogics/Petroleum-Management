@@ -175,7 +175,7 @@ Inter Variable 5.3.0 is bundled in `static/fonts` under the adjacent SIL Open Fo
 
 ### Owner Party ledger
 
-**Ledger** opens a directory of people and businesses. Open a party for one dated transaction history, with separate running balances for money to collect, money to pay, and staff advances. Credit sales, bills, receipts, salary payments, advance recoveries and reversals appear in the same history when they belong to the party. Record a bill, amount owed, or fuel credit from their statement. Staff records can also open salary and advance forms.
+**Ledger** opens a directory of people and businesses. Open a party for one dated transaction history, with separate running balances for money to collect, money to pay, and staff advances. Credit sales, bills, receipts, salary payments, advance recoveries and reversals appear in the same history when they belong to the party. Record a bill, amount owed, or fuel credit from their statement. For money owed, enter the name and amount. The date defaults to today and a reference is generated unless you supply one in **More details**. Staff records can also open salary and advance forms.
 
 Saved contacts collect existing customer and supplier records under the same name. A staff profile stays separate until it is explicitly linked to a saved contact. Use **Link staff to contact** in the staff statement or **Party ledger contact** when editing the staff profile. Linking brings existing salaries and advances into the saved contact’s history. The link follows the staff ID if their payroll name changes.
 
