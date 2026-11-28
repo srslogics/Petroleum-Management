@@ -173,15 +173,18 @@ Inter Variable 5.3.0 is bundled in `static/fonts` under the adjacent SIL Open Fo
 
 `npm test` checks actual font loading, headings, inputs, buttons, tables, small text, overflow and offline typography across owner and manager screens at 1440px, 1024px, 390px and 320px widths.
 
-### Owner Ledger
+### Owner Party ledger
 
-The Owner's **Ledger** has five views:
+**Ledger** opens a directory of people and businesses. Open a party for one dated transaction history, with separate running balances for money to collect, money to pay, and staff advances. Credit sales, bills, receipts, salary payments, advance recoveries and reversals appear in the same history when they belong to the party. Record a bill, amount owed, or fuel credit from their statement. Staff records can also open salary and advance forms.
 
-- **Balances** shows fuel credit and other amounts owed to the station, as well as outstanding bills and salaries. Open a customer or supplier to review their statement. The date selector shows balances as of a past business day.
-- **To collect** records fuel credit, other money owed, and payments received. Use **Other dues** for unpaid invoices, supplier refunds, loans to recover, reimbursements and opening balances. Due dates feed the overdue total and exception inbox.
-- **To pay** contains bills, salaries, staff advances, staff details and one payment history. Staff advances to recover appear in their own section.
-- **Banking** confirms UPI and card settlements and records cash deposits. Use **Bank statement imports** to open the existing import and matching workflow.
-- **Books** contains the **Journal** and **Trial balance** for accounting checks and exports. The selected statement date applies to **Balances**, **Journal** and **Trial balance**.
+Saved contacts collect existing customer and supplier records under the same name. A staff profile stays separate until it is explicitly linked to a saved contact. Use **Link staff to contact** in the staff statement or **Party ledger contact** when editing the staff profile. Linking brings existing salaries and advances into the saved contact’s history. The link follows the staff ID if their payroll name changes.
+
+**Money tools** provides:
+
+- **To collect** for the outstanding work across customers and other receivables.
+- **To pay** for bills, salaries, staff advances, and payment history.
+- **Banking** for UPI and card settlements, cash deposits, and bank statement imports.
+- **Books** for the station Journal and Trial balance. Choose a statement date to view or export historical reports.
 
 Recorded adjustments create dated reversals and leave the original postings visible.
 
@@ -191,13 +194,13 @@ Use **Journal entry** for opening amounts, account adjustments, and valuation su
 
 **Contacts** saves names and optional WhatsApp numbers for the station. The same directory supplies name suggestions in owner money, bill and staff entry forms. WhatsApp opens a draft with the saved number when available. Owners can also save or update a contact from the party ledger.
 
-Cash received against a receivable appears in **Ledger → Banking** as a pending deposit until it is banked.
+Cash received against a receivable appears in **Ledger → Money tools → Banking** as a pending deposit until it is banked.
 
 **Activity** keeps a history in each workspace. To correct an entry, void it with a reason and enter a replacement. Void linked deposits before their cash payments and linked payments before the underlying receivable.
 
 ### Payroll and Payables
 
-Use **Ledger → To pay → Bills** for supplier invoices and other business bills. Use **Salaries**, **Staff advances**, and **Staff** within **To pay** for payroll. Staff profiles are separate from manager login accounts.
+Use **Ledger → Money tools → To pay → Bills** for supplier invoices and other business bills. Use **Salaries**, **Staff advances**, and **Staff** within **To pay** for payroll. Staff profiles are separate from manager login accounts.
 
 Under **Staff**, add a staff member with a unique code and optional monthly salary default. Prepare one salary per staff member and month using the actual amount earned. An advance remains outstanding until it is returned or explicitly applied when preparing a salary. The amount applied reduces the salary left to pay. Salary payments may be partial; inactive staff can still receive existing dues or return advances. Changing a staff salary default does not change prepared salaries. Taxes, attendance and statutory deductions are not calculated automatically.
 

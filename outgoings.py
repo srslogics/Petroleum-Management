@@ -73,8 +73,13 @@ class Ledger:
         return value
 
     def state_queries(self):
-        return [(f"SELECT {'id, name' if table == 'users' else '*'} FROM {table} WHERE station_id = ? ORDER BY id DESC", (self.sid,))
-                for table in ('payroll_staff', 'payroll_salaries', 'payable_bills', 'outgoing_entries', 'users')]
+        staff_query = ("""SELECT staff.*, link.contact_id FROM payroll_staff staff
+            LEFT JOIN staff_party_contacts link ON link.staff_id = staff.id
+            WHERE staff.station_id = ? ORDER BY staff.id DESC""", (self.sid,))
+        return [staff_query, *[
+            (f"SELECT {'id, name' if table == 'users' else '*'} FROM {table} WHERE station_id = ? ORDER BY id DESC", (self.sid,))
+            for table in ('payroll_salaries', 'payable_bills', 'outgoing_entries', 'users')
+        ]]
 
     def state(self, writing=False, rows=None):
         if rows is None:
@@ -120,6 +125,22 @@ class Ledger:
         values = dict(station_id=self.sid, **values, user_id=self.user['id'], created_at=self.now())
         self.db.execute(f"INSERT INTO {table} ({','.join(values)}) VALUES ({','.join('?' for _ in values)})", tuple(values.values()))
 
+    def link_staff_contact(self, staff_id, contact_id):
+        if contact_id is None:
+            self.db.execute("DELETE FROM staff_party_contacts WHERE staff_id = ?", (staff_id,))
+            return
+        if type(contact_id) is not int or not 0 < contact_id < 10**18:
+            self.fail("Choose a valid saved contact.")
+        linked = self.db.execute("""SELECT link.staff_id FROM station_contacts contact
+            LEFT JOIN staff_party_contacts link ON link.contact_id = contact.id
+            WHERE contact.station_id = ? AND contact.id = ?""", (self.sid, contact_id)).fetchone()
+        if not linked:
+            self.fail("Contact not found.", 404)
+        if linked["staff_id"] not in (None, staff_id):
+            self.fail("This contact is already linked to a staff profile.", 409)
+        self.db.execute("""INSERT INTO staff_party_contacts (staff_id, contact_id) VALUES (?, ?)
+            ON CONFLICT(staff_id) DO UPDATE SET contact_id = excluded.contact_id""", (staff_id, contact_id))
+
     def mutate(self, route, body, *, in_transaction=False):
         with nullcontext() if in_transaction else transaction(self.db, immediate=True):
             state = self.state(True)
@@ -128,14 +149,20 @@ class Ledger:
                     job_title=self.text(body, 'job_title', False, 80), phone=self.text(body, 'phone', False, 24),
                     monthly_salary=self.amount(body, 'monthly_salary', True))
                 if 'id' in body:
-                    self.find(state, 'staff', body['id'])
+                    staff_id = self.find(state, 'staff', body['id'])["id"]
                     if type(body.get('active')) is not bool:
                         self.fail('Choose an active staff status.')
                     values['active'] = int(body['active'])
                     self.db.execute(f"UPDATE payroll_staff SET {','.join(k+' = ?' for k in values)} WHERE id = ? AND station_id = ?",
-                                    (*values.values(), body['id'], self.sid))
+                                    (*values.values(), staff_id, self.sid))
                 else:
                     self.insert('payroll_staff', values)
+                    staff_id = None
+                if 'contact_id' in body:
+                    if staff_id is None:
+                        staff_id = self.db.execute("SELECT id FROM payroll_staff WHERE station_id = ? AND code = ?",
+                                                   (self.sid, values['code'])).fetchone()["id"]
+                    self.link_staff_contact(staff_id, body['contact_id'])
             elif route == '/payroll/salaries':
                 staff = self.find(state, 'staff', body.get('staff_id'))
                 if not staff['active']:

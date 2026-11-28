@@ -164,7 +164,7 @@ function pendingCreditSummary(data) {
     </li>`).join('')}</ul></details>`;
 }
 
-function openShiftCredit(data, item = null) {
+function openShiftCredit(data, item = null, name = '') {
   if (!data.active) {
     moneyDialog('Record customer credit', `<p class="money-dialog-intro">Record credit while a shift is open. Ask the manager to open a shift, or open a submitted shift’s report if you need to correct its figures.</p>
       ${data.unallocated_credit ? '<button id="credit-assign-existing" class="secondary" type="button">Assign existing credit</button>' : ''}`);
@@ -175,7 +175,7 @@ function openShiftCredit(data, item = null) {
   const route = '/shift-credit' + (item ? '/' + item.id : '');
   moneyDialog(item ? 'Edit pending credit' : 'Record customer credit', `<form id="shift-credit-form" class="money-form">
     <div class="money-source"><span>Shift #${shiftId}</span><strong>${businessDay(data.active.business_date)}</strong></div>
-    ${contactNameField('Customer / account name', 'party', item?.party, {knownNames: data.customers.map(customer => customer.name)})}
+    ${contactNameField('Customer / account name', 'party', item?.party || name, {knownNames: data.customers.map(customer => customer.name)})}
     ${numberField('Credit amount (₹)', 'amount', {required:true, min:0.01, value:item ? (item.amount / 100).toFixed(2) : undefined})}
     <label>Sale reference<input name="reference" value="${safe(item?.reference)}" placeholder="Receipt or invoice number" required maxlength="150"></label>
     <label>Note (optional)<textarea name="note" rows="2" maxlength="150">${safe(item?.note)}</textarea></label>
@@ -309,10 +309,10 @@ function filterMarketRows() {
   }
 }
 
-function openMarketForm(data) {
+function openMarketForm(data, name = '') {
   const view = document.getElementById('main-content').dataset.view;
   moneyDialog('Record money owed', `<form id="market-receivable-form" class="money-form">
-    ${contactNameField('Owed by (person or company)', 'party', '', {knownNames: data.market_receivables.map(item => item.party)})}
+    ${contactNameField('Owed by (person or company)', 'party', name, {knownNames: data.market_receivables.map(item => item.party)})}
     <div><label for="market-kind">Receivable type</label><select id="market-kind" name="kind" required><option value="">Choose a type</option>${moneyOptions(Object.entries(marketKinds))}</select></div>
     ${numberField('Amount owed (₹)', 'amount', {min: 0.01, required: true})}
     <div class="money-form-grid">${businessDate('Date owed', 'recorded_on', data.today)}${businessDate('Due date (optional)', 'due_date', '', false)}</div>

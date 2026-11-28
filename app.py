@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 from automation import AUTOMATION_SCHEMA, Automation, accept_feed
 from security import Throttle, client_address
-from contacts import CONTACTS_SCHEMA, contacts_route
+from contacts import CONTACTS_SCHEMA, contact_query, contacts_route
 from financial import FINANCIAL_SCHEMA, financial_queries, journal_route, ledger_report, validate_fuel_payment
 from mfa import MFA, MFA_SCHEMA, mfa_cipher
 from manager_drafts import DRAFT_SCHEMA, draft_route, draft_query, unpack_draft
@@ -1528,17 +1528,21 @@ class Request:
                 ledger = Ledger(db, user, now, fail, number, note)
                 incoming_queries = business_queries(sid)
                 outgoing_queries = ledger.state_queries()
-                snapshot = read_snapshot(db, [*incoming_queries, *outgoing_queries, *financial_queries(sid)[1:]])
+                snapshot = read_snapshot(db, [*incoming_queries, *outgoing_queries, *financial_queries(sid)[1:], contact_query(sid)])
                 split = len(incoming_queries)
                 end = split + len(outgoing_queries)
                 incoming = business_state(db, sid, results=snapshot[:split])
                 outgoing = ledger.state(rows=snapshot[split:end])
                 shifts = [row for row in snapshot[0] if row["submitted_at"]]
-                keys = ("customers", "repayments", "market_receivables", "market_receipts", "unallocated_credit", "today")
+                keys = ("active", "customers", "repayments", "market_receivables", "market_receipts", "unallocated_credit", "unallocated_shifts", "today")
                 return {key: incoming[key] for key in keys} | {
+                    "contacts": list(map(dict, snapshot[-1])),
                     "bills": outgoing["bills"],
                     "bill_payments": [entry for entry in outgoing["entries"] if entry["kind"] == "bill"],
-                    "financial": ledger_report(incoming, outgoing, [shifts, *snapshot[end:]], cutoff),
+                    "staff": outgoing["staff"],
+                    "salaries": outgoing["salaries"],
+                    "staff_entries": [entry for entry in outgoing["entries"] if entry["kind"] != "bill"],
+                    "financial": ledger_report(incoming, outgoing, [shifts, *snapshot[end:-1]], cutoff),
                 }
             if method == "POST" and route in ("/ledger/journals", "/ledger/journals/reverse"):
                 return journal_route(db, user, route, data, now=now, fail=fail, business_date=business_date,

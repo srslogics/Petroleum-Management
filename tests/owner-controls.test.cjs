@@ -48,12 +48,18 @@ test('owner controls work through desktop and mobile screens', async t => {
     assert.equal(result.status(),200,await result.text());
     return result.json();
   };
+  const openMoneyTool = async name => {
+    const tools = page.getByRole('navigation', {name:'Money tools'});
+    if (!await tools.locator('details').evaluate(element => element.open)) {
+      await tools.getByText('Money tools', {exact:true}).click();
+    }
+    await tools.getByRole('button', {name, exact:true}).click();
+    await page.getByRole('heading', {name, exact:true, level:1}).waitFor();
+  };
   const openCollections = async () => {
-    const tab = page.getByRole('tab',{name:'To collect',exact:true});
     await page.getByRole('button',{name:'Ledger',exact:true}).click();
-    await page.getByRole('tab',{name:'Balances',exact:true,selected:true}).waitFor();
-    await tab.click();
-    await page.locator('#ledger-tab-collect[aria-selected="true"]').waitFor();
+    await page.getByRole('heading',{name:'Party ledger',exact:true}).waitFor();
+    await openMoneyTool('To collect');
   };
   await post('manager/login',{email:'manager@demo.local',password:'ManagerDemo123!'});
   await post('manager/shift',{openings:{1:100,2:200}});
@@ -138,12 +144,12 @@ test('owner controls work through desktop and mobile screens', async t => {
   await page.getByRole('button',{name:'Operations',exact:true}).click();
   await pendingOperations;
   await openCollections();
-  await page.locator('#ledger-tab-collect[aria-selected="true"]').waitFor();
+  await page.getByRole('heading',{name:'To collect',exact:true,level:1}).waitFor();
   const priorResponse = page.waitForResponse('**/api/owner/business/operations');
   await releaseRequest();
   await (await priorResponse).finished();
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert.equal(await page.locator('#ledger-tab-collect[aria-selected="true"]').isVisible(), true);
+  assert.equal(await page.getByRole('heading',{name:'To collect',exact:true,level:1}).isVisible(), true);
   await page.getByRole('button',{name:'Overview',exact:true}).click();
   await page.route('**/api/owner/business/operations', async route => {
     const response = await route.fetch();
@@ -240,7 +246,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   assert.equal(await payment.getByLabel('Amount received (₹)').inputValue(),'100');
   await payment.getByRole('button',{name:'Close dialog',exact:true}).click();
   await page.getByRole('button',{name:'Ledger',exact:true}).click();
-  await page.getByRole('tab',{name:'Banking',exact:true}).click();
+  await openMoneyTool('Banking');
   const card = page.getByRole('row').filter({has:page.getByText('Card',{exact:true})});
   await card.getByRole('button',{name:'Record settlement',exact:true}).click();
   const receipt = page.getByRole('dialog');
@@ -324,7 +330,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   if (process.env.OWNER_SCREENSHOT_DIR) {
     await mkdir(process.env.OWNER_SCREENSHOT_DIR,{recursive:true});
     await openCollections();
-    await page.locator('#ledger-tab-collect[aria-selected="true"]').waitFor();
+    await page.getByRole('heading',{name:'To collect',exact:true,level:1}).waitFor();
     await page.screenshot({path:path.join(process.env.OWNER_SCREENSHOT_DIR,'owner-money-mobile.png'),fullPage:true});
     await page.setViewportSize({width:1440,height:1000});
     await page.screenshot({path:path.join(process.env.OWNER_SCREENSHOT_DIR,'owner-money-desktop.png'),fullPage:true});

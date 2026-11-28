@@ -96,6 +96,28 @@ class FinancialLedgerTest(unittest.TestCase):
         self.assertEqual({code: balance[code] for code in expected_rupees},
                          {code: rupees * 100 for code, rupees in expected_rupees.items()})
 
+    def test_staff_history_links_to_a_saved_contact_in_the_same_station(self):
+        self.call("/contacts", {"name": "Fleet A"})
+        contact = self.call("/contacts")["contacts"][0]
+        with closing(open_db(self.path)) as db:
+            db.execute("INSERT INTO stations VALUES (2, 'Other station', 'OTHER')")
+            db.execute("""INSERT INTO station_contacts (id, station_id, name, name_key)
+                          VALUES (50, 2, 'Other contact', 'other contact')""")
+            db.commit()
+        staff = {"name": "Fleet A payroll", "code": "EMP-1", "monthly_salary": 500}
+        self.call("/payroll/staff", staff | {"contact_id": 50}, status=404)
+        self.assertEqual(self.call("/payroll")["staff"], [])
+        self.call("/payroll/staff", staff | {"contact_id": contact["id"]})
+        self.call("/payroll/staff", staff | {"code": "EMP-2", "contact_id": contact["id"]}, status=409)
+        employee = self.call("/payroll")["staff"][0]
+        self.call("/payroll/staff", staff | {"id": employee["id"], "name": "Renamed staff profile", "active": True})
+        self.payment("advance", employee["id"], 25, "ADVANCE-1", "2026-11-20", "cash")
+        ledger = self.call("/business/ledger")
+        self.assertEqual(ledger["contacts"], [contact | {"name_key": "fleet a"}])
+        self.assertEqual(ledger["staff"][0]["contact_id"], contact["id"])
+        self.assertEqual(ledger["staff"][0]["name"], "Renamed staff profile")
+        self.assertEqual(ledger["financial"]["entries"][0]["staff_id"], employee["id"])
+
     def test_backdated_receipt_respects_future_payments_and_reversals_have_own_date(self):
         self.shift((110, 210), {"credit": 100}, 0,
                    entries={"payments": [{"method": "credit", "amount": 100, "party": "Fleet A"}]})

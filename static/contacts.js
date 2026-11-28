@@ -22,7 +22,7 @@ function contactNameField(label, name, value = '', options = {}) {
     <input id="${id}" ${options.entry ? 'data-field' : 'name'}="${name}" value="${safe(value)}" maxlength="150" autocomplete="off"
       ${options.required === false ? '' : 'required'} role="combobox" aria-autocomplete="list"
       aria-expanded="false" aria-controls="${id}-options" data-contact-field
-      data-contact-names="${safe(JSON.stringify(options.knownNames || []))}" data-contact-phone="${options.phoneField || ''}">
+      data-contact-names="${safe(JSON.stringify(options.knownNames || []))}" data-contact-phone="${options.phoneField || ''}" data-contact-select="${options.contactSelect || ''}">
     <div id="${id}-options" class="contact-options" role="listbox" aria-label="Matching contacts" hidden></div>
   </div>`;
 }
@@ -48,6 +48,8 @@ function bindContactField(input) {
   };
   const choose = choice => {
     input.value = choice.name;
+    const contactSelect = input.form?.elements[input.dataset.contactSelect];
+    if (contactSelect && choice.id) contactSelect.value = String(choice.id);
     if (phone && choice.phone) {
       phone.value = choice.phone;
       if (whatsappPicker) phone.dataset.fromContact = 'true';
