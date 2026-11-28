@@ -1,7 +1,7 @@
 "use strict";
 
-const outgoingView = {payroll:'salaries',payables:'bills'};
-let outgoingData, outgoingPage;
+const outgoingTabs = [['bills', 'Bills'], ['salaries', 'Salaries'], ['advances', 'Staff advances'], ['staff', 'Staff'], ['activity', 'Activity']];
+let outgoingData, outgoingTab;
 const outgoingLabels = {salary:'Salary payment',bill:'Bill payment',advance:'Staff advance',advance_return:'Advance returned'};
 const outgoingStaff = id => outgoingData.staff.find(s=>s.id===id);
 const outgoingParty = (row, model = outgoingData) => row.payee || model.staff.find(staff => staff.id === row.staff_id)?.name ||
@@ -12,41 +12,78 @@ const outgoingNote = () => '<label>Note (optional)<textarea name="note" maxlengt
 const outgoingButton = (action,id,label,style='text-button',accessibleName='') => `<button type="button" class="${style}" data-action="${action}" data-id="${id}"${accessibleName ? ` aria-label="${safe(accessibleName)}"` : ''}>${label}</button>`;
 const outgoingStatus = row => row.voided_at ? moneyBadge('Voided') : row.balance===0 ? moneyBadge('Paid','positive') : row.overdue ? moneyBadge('Overdue','warning') : moneyBadge(row.paid?'Part paid':'Unpaid');
 
-function openOutgoings(page, afterRender) {
-  return loadOwnerView('/' + page, data => {
-    outgoingPage = page;
+function openOutgoings(tab = 'bills', afterRender) {
+  return loadOwnerView('/payables', data => {
+    outgoingTab = tab;
     outgoingData = data;
     renderOutgoings();
     afterRender?.();
   });
 }
+
 function renderOutgoings() {
-  const d=outgoingData, payroll=outgoingPage==='payroll', tab=outgoingView[outgoingPage];
-  const salaries=d.salaries.filter(s=>!s.voided_at), bills=d.bills.filter(b=>!b.voided_at);
-  const entries=d.entries.filter(e=>(payroll?e.kind!=='bill':e.kind==='bill'));
-  const paid=entries.filter(e=>!e.voided_at && e.kind===(payroll?'salary':'bill') && e.paid_on.startsWith(d.today.slice(0,7))).reduce((s,e)=>s+e.amount,0);
-  const stats=payroll ? [['Salary to pay',salaries.reduce((s,r)=>s+r.balance,0),'Unpaid salary balances'],['Advances to recover',d.staff.reduce((s,r)=>s+r.advance_balance,0),'Outstanding staff advances'],['Salaries paid',paid,'This month'],['Active staff',d.staff.filter(s=>s.active).length,'On the staff register',true]] :
-    [['Bills to pay',bills.reduce((s,r)=>s+r.balance,0),'All unpaid bills'],['Overdue bills',bills.filter(r=>r.overdue).reduce((s,r)=>s+r.balance,0),'Past the due date'],['Due in 7 days',bills.filter(r=>r.due_date>=d.today && Date.parse(r.due_date)-Date.parse(d.today)<=7*86400000).reduce((s,r)=>s+r.balance,0),'Including today'],['Bills paid',paid,'This month']];
-  const tabs=payroll?[['salaries','Salaries'],['advances','Advances'],['staff','Staff'],['activity','Activity']]:[['bills','Bills'],['activity','Activity']];
-  const actions = outgoingButton('automation',0,'Recurring drafts','secondary') + (payroll
-    ? outgoingButton('staff-new',0,'+ Add staff','secondary')+outgoingButton('advance-new',0,'+ Staff advance','secondary')+outgoingButton('salary-new',0,'+ Add salary','primary')
-    : outgoingButton('bill-new',0,'+ Add bill','primary'));
-  const body = `    <div class="money-stats">${stats.map(([label,value,caption,count])=>`<section class="money-stat"><div><span>${label}</span></div><strong>${count?value:money(value)}</strong><small>${caption}</small></section>`).join('')}</div>
-    <section class="money-workspace outgoing-workspace" aria-label="${payroll?'Payroll':'To pay'} workspace"><div class="money-workspace-top"><div class="money-tabs" role="tablist" aria-label="${payroll?'Payroll':'To pay'} sections">${tabs.map(([id,label])=>`<button type="button" role="tab" id="out-tab-${id}" aria-controls="out-panel" aria-selected="${tab===id}" tabindex="${tab===id?0:-1}" data-tab="${id}">${label}</button>`).join('')}</div>${outgoingButton('help',0,'How this works')}</div>
-    <div role="tabpanel" id="out-panel" aria-labelledby="out-tab-${tab}"><div class="money-toolbar"><h2>${tabs.find(t=>t[0]===tab)[1]}</h2><div class="money-tools">${moneySearch('out-search','Search names or references','')}<label><span class="sr-only">Record status</span><select id="out-status"><option value="all">All records</option>${tab==='staff'?'<option value="active">Active</option><option value="inactive">Inactive</option>':tab==='advances'?'<option value="outstanding">Outstanding</option>':tab==='activity'?'<option value="recorded">Recorded</option><option value="void">Voided</option>':'<option value="outstanding">Unpaid</option><option value="overdue">Overdue</option><option value="paid">Paid</option><option value="void">Voided</option>'}</select></label></div></div>
-    ${outgoingTable(tab,entries)}<div id="out-no-match" hidden>${moneyEmpty('No matching records','Try another search or status.')}</div></div>
-    <footer class="money-panel-footer"><span>Amounts in INR · All dates</span><span>Recorded payments only</span></footer></section>`;
-  shell(payroll ? `<div class="money-heading"><div>${heading('', 'Payroll', 'Staff salaries, advances and payment history.')}</div>
-    <div class="money-heading-actions">${actions}</div></div>${body}`
-    : ledgerWorkspace('pay', 'Manage supplier bills and record payments.', actions, body), outgoingPage);
-  if (!payroll) bindLedgerNavigation('pay');
-  document.querySelectorAll('[data-tab]').forEach(button=>{
-    button.addEventListener('click',()=>{outgoingView[outgoingPage]=button.dataset.tab;renderOutgoings();document.querySelector('#out-tab-'+button.dataset.tab).focus();});
-    button.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const i=tabs.findIndex(t=>t[0]===button.dataset.tab);const next=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;outgoingView[outgoingPage]=tabs[next][0];renderOutgoings();document.querySelector('#out-tab-'+tabs[next][0]).focus();});
+  const d = outgoingData;
+  const tab = outgoingTab;
+  const selected = outgoingTabs.find(([key]) => key === tab)[1];
+  const billsDue = d.bills.filter(row => !row.voided_at).reduce((sum, row) => sum + row.balance, 0);
+  const salariesDue = d.salaries.filter(row => !row.voided_at).reduce((sum, row) => sum + row.balance, 0);
+  const staffAdvances = d.staff.reduce((sum, row) => sum + row.advance_balance, 0);
+  const actions = {
+    bills: outgoingButton('automation', 0, 'Recurring drafts', 'secondary') + outgoingButton('bill-new', 0, '+ Add bill', 'primary'),
+    salaries: outgoingButton('automation', 0, 'Recurring drafts', 'secondary') + outgoingButton('salary-new', 0, '+ Add salary', 'primary'),
+    advances: outgoingButton('advance-new', 0, '+ Staff advance', 'primary'),
+    staff: outgoingButton('staff-new', 0, '+ Add staff', 'primary'),
+    activity: '',
+  }[tab];
+  const stats = tab === 'advances'
+    ? [['Staff advances to recover', staffAdvances]]
+    : [['Bills to pay', billsDue], ['Salaries to pay', salariesDue]];
+  const extra = tab === 'bills' || tab === 'salaries' ? outgoingSummary(d, tab) : '';
+  const body = `<div class="money-stats ledger-stats">${stats.map(([label, value]) => `
+      <section class="money-stat" aria-label="${label}"><div>${label}</div><strong>${money(value)}</strong></section>`).join('')}</div>
+    ${extra}
+    <section class="money-workspace outgoing-workspace" aria-label="To pay workspace">
+      <div class="money-workspace-top">
+        <div class="money-tabs" role="tablist" aria-label="To pay sections">
+          ${ledgerTabButtons(outgoingTabs, tab, 'out-tab-', 'out-panel')}
+        </div>${outgoingButton('help', 0, 'How this works')}
+      </div>
+      <div role="tabpanel" id="out-panel" aria-labelledby="out-tab-${tab}">
+        <div class="money-toolbar"><h2>${selected}</h2><div class="money-tools">${moneySearch('out-search', 'Search names or references', '')}
+          <label><span class="sr-only">Record status</span><select id="out-status"><option value="all">All records</option>${tab==='staff'?'<option value="active">Active</option><option value="inactive">Inactive</option>':tab==='advances'?'<option value="outstanding">Outstanding</option>':tab==='activity'?'<option value="recorded">Recorded</option><option value="void">Voided</option>':'<option value="outstanding">Unpaid</option><option value="overdue">Overdue</option><option value="paid">Paid</option><option value="void">Voided</option>'}</select></label>
+        </div></div>
+        ${outgoingTable(tab, d.entries)}<div id="out-no-match" hidden>${moneyEmpty('No matching records', 'Try another search or status.')}</div>
+      </div>
+      <footer class="money-panel-footer"><span>All dates · Amounts in INR</span></footer>
+    </section>`;
+  shell(ledgerWorkspace('pay', actions, body), 'payables');
+  bindLedgerNavigation('pay');
+  bindLedgerTabs(outgoingTabs, 'out-tab-', tab, next => {
+    outgoingTab = next;
+    renderOutgoings();
   });
   bindOutgoingActions();
-  listen('out-search',filterOutgoingRows,'input');listen('out-status',filterOutgoingRows,'change');
+  listen('out-search', filterOutgoingRows, 'input');
+  listen('out-status', filterOutgoingRows, 'change');
 }
+function outgoingSummary(data, tab) {
+  const bills = tab === 'bills';
+  const kind = bills ? 'bill' : 'salary';
+  const paid = data.entries.filter(row => row.kind === kind && !row.voided_at && row.paid_on.startsWith(data.today.slice(0, 7)))
+    .reduce((sum, row) => sum + row.amount, 0);
+  const records = (bills ? data.bills : data.salaries).filter(row => !row.voided_at && row.balance > 0);
+  const overdue = records.filter(row => row.overdue).reduce((sum, row) => sum + row.balance, 0);
+  const dueSoon = records.filter(row => row.due_date >= data.today && Date.parse(row.due_date) - Date.parse(data.today) <= 7 * 86400000)
+    .reduce((sum, row) => sum + row.balance, 0);
+  return `<details class="ledger-statement-date"><summary>${bills ? 'Bill summary' : 'Salary summary'}</summary>
+    <dl class="ledger-balances outgoing-summary">
+      <div><dt>Overdue</dt><dd>${money(overdue)}</dd></div>
+      <div><dt>Due in 7 days</dt><dd>${money(dueSoon)}</dd></div>
+      <div><dt>Paid this month</dt><dd>${money(paid)}</dd></div>
+      ${bills ? '' : `<div><dt>Active staff</dt><dd>${data.staff.filter(row => row.active).length}</dd></div>`}
+    </dl></details>`;
+}
+
 function outgoingTable(tab,entries) {
   const d=outgoingData;
   const rows=tab==='salaries'?d.salaries:tab==='bills'?d.bills:tab==='activity'?entries:d.staff;
@@ -92,25 +129,70 @@ function filterOutgoingRows(){
 }
 function outgoingForm(title,content,route,extra={},button='Save record'){
   const view = document.getElementById('main-content').dataset.view;
+  const tab = outgoingTab;
   const dialog=moneyDialog(title,`<form id="out-form" class="money-form">${content}${errorbox}<button class="primary">${button}</button></form>`);
-  bindForm('out-form',async form=>{const body={...fields(form),...extra};for(const key of ['id','staff_id','source_id'])if(key in body)body[key]=Number(body[key]);if('active'in body)body.active=body.active==='true'||body.active===true;await api(route,body);if(view==='ledger')await openBusiness(view);else await openOutgoings(view);document.querySelector('main h1').focus({preventScroll:true});showBusinessNotice('Record saved.');});
+  bindForm('out-form',async form=>{const body={...fields(form),...extra};for(const key of ['id','staff_id','source_id'])if(key in body)body[key]=Number(body[key]);if('active'in body)body.active=body.active==='true'||body.active===true;if('contact_id'in body)body.contact_id=body.contact_id?Number(body.contact_id):null;await api(route,body);if(view==='ledger')await openBusiness(view);else await openOutgoings(tab);document.querySelector('main h1').focus({preventScroll:true});showBusinessNotice('Record saved.');});
   return dialog;
 }
-function staffOptions(selected,returns=false){return outgoingData.staff.filter(s=>s.active||returns&&s.advance_balance>0).map(s=>`<option value="${s.id}" ${s.id===selected?'selected':''}>${safe(s.name)} · ${safe(s.code)}</option>`).join('');}
-function outgoingStaffForm(staff){
-  outgoingForm(staff?'Edit staff':'Add staff',(staff ? outgoingText('Staff name','name',staff.name) : contactNameField('Staff name', 'name', '', {phoneField: 'phone'}))+outgoingText('Staff code','code',staff?.code||'STF-'+String(Math.max(0,...outgoingData.staff.map(s=>s.id))+1).padStart(3,'0'))+outgoingText('Job title (optional)','job_title',staff?.job_title,false)+outgoingText('Phone (optional)','phone',staff?.phone,false)+outgoingAmount('Monthly salary (₹)','monthly_salary',staff?.monthly_salary||0,true)+'<p class="money-form-hint">Used as the default for new salaries. Existing salary records keep their original amounts.</p>'+(staff?`<label>Staff status<select name="active"><option value="true" ${staff.active?'selected':''}>Active</option><option value="false" ${!staff.active?'selected':''}>Inactive</option></select></label>`:''),'/payroll/staff',staff?{id:staff.id}:{},'Save staff');
+function staffOptions(selected, returns = false, model = outgoingData) {
+  return model.staff.filter(person => person.active || returns && person.advance_balance > 0)
+    .map(person => `<option value="${person.id}" ${person.id === selected ? 'selected' : ''}>${safe(person.name)} · ${safe(person.code)}</option>`).join('');
 }
-function outgoingSalaryForm(){
-  const staff = outgoingData.staff.find(s => s.active);
+
+async function outgoingStaffForm(staff) {
+  const page = document.getElementById('main-content');
+  const contacts = await ownerContacts().catch(() => null);
+  if (!page.isConnected) return;
+  const linked = moneyOptions([['', 'No saved contact'], ...(contacts || []).map(contact => [contact.id, safe(contact.name)])],
+    staff?.contact_id || '');
+  const name = staff ? outgoingText('Staff name', 'name', staff.name)
+    : contactNameField('Staff name', 'name', '', {phoneField: 'phone', contactSelect: 'contact_id'});
+  const code = staff?.code || 'STF-' + String(Math.max(0, ...outgoingData.staff.map(person => person.id)) + 1).padStart(3, '0');
+  outgoingForm(staff ? 'Edit staff' : 'Add staff', `${name}
+    ${contacts ? `<label>Party ledger contact<select name="contact_id">${linked}</select></label>
+    <p class="money-form-hint">${contacts.length ? 'Link a saved contact to show their staff transactions in the same history.' : 'Add a saved contact in Party ledger to link this staff profile.'}</p>`
+      : '<p class="money-form-hint">Saved contacts could not be loaded. Reopen this form to link a contact.</p>'}
+    ${outgoingText('Staff code', 'code', code)}
+    ${outgoingText('Job title (optional)', 'job_title', staff?.job_title, false)}
+    ${outgoingText('Phone (optional)', 'phone', staff?.phone, false)}
+    ${outgoingAmount('Monthly salary (₹)', 'monthly_salary', staff?.monthly_salary || 0, true)}
+    <p class="money-form-hint">Used as the default for new salaries. Existing salary records keep their original amounts.</p>
+    ${staff ? `<label>Staff status<select name="active"><option value="true" ${staff.active ? 'selected' : ''}>Active</option>
+      <option value="false" ${staff.active ? '' : 'selected'}>Inactive</option></select></label>` : ''}`,
+    '/payroll/staff', staff ? {id: staff.id} : {}, 'Save staff');
+}
+
+function outgoingSalaryForm(staffId, model = outgoingData) {
+  const staff = model.staff.find(person => person.active && (!staffId || person.id === staffId));
   if (!staff) {
     moneyDialog('Add staff first', '<p>Add an active staff member before preparing a salary.</p><button id="salary-add-staff" class="primary" type="button">Add staff member</button>');
     listen('salary-add-staff', () => outgoingStaffForm());
     return;
   }
-  const dialog=outgoingForm('Add salary',`<label>Staff member<select name="staff_id">${staffOptions(staff.id)}</select></label><div class="money-form-grid"><label>Salary month<input name="period" type="month" max="${outgoingData.today.slice(0,7)}" value="${outgoingData.today.slice(0,7)}" required></label>${businessDate('Payment due date','due_date',outgoingData.today)}</div>${outgoingAmount('Salary earned (₹)','amount',staff.monthly_salary)}${outgoingAmount('Apply advance (₹)','advance_applied',0,true)}<p class="money-form-hint" id="out-advance-hint"></p><div class="outgoing-net" id="out-net"></div>${outgoingNote()}`,'/payroll/salaries',{},'Add salary');
-  const form=dialog.querySelector('form');const update=()=>{const person=outgoingStaff(Number(form.elements.staff_id.value));document.querySelector('#out-advance-hint').textContent=`${money(person.advance_balance)} in outstanding advances. Apply only the amount you want to recover this month.`;form.elements.advance_applied.max=(person.advance_balance/100).toFixed(2);document.querySelector('#out-net').textContent='Salary to pay: '+money(Math.round((Number(form.elements.amount.value)-Number(form.elements.advance_applied.value))*100));};form.elements.staff_id.addEventListener('change',()=>{form.elements.amount.value=(outgoingStaff(Number(form.elements.staff_id.value)).monthly_salary/100).toFixed(2);form.elements.advance_applied.value='0.00';update();});form.addEventListener('input',update);update();
+  const dialog = outgoingForm('Add salary', `<label>Staff member<select name="staff_id">${staffOptions(staff.id, false, model)}</select></label>
+    <div class="money-form-grid"><label>Salary month<input name="period" type="month" max="${model.today.slice(0, 7)}"
+      value="${model.today.slice(0, 7)}" required></label>${businessDate('Payment due date', 'due_date', model.today)}</div>
+    ${outgoingAmount('Salary earned (₹)', 'amount', staff.monthly_salary)}
+    ${outgoingAmount('Apply advance (₹)', 'advance_applied', 0, true)}
+    <p class="money-form-hint" id="out-advance-hint"></p><div class="outgoing-net" id="out-net"></div>${outgoingNote()}`,
+    '/payroll/salaries', {}, 'Add salary');
+  const {staff_id: personField, amount, advance_applied: advanceField} = dialog.querySelector('form').elements;
+  const selected = () => model.staff.find(person => person.id === Number(personField.value));
+  const update = () => {
+    const {advance_balance: balance} = selected();
+    document.getElementById('out-advance-hint').textContent = `${money(balance)} in outstanding advances. Apply only the amount you want to recover this month.`;
+    advanceField.max = (balance / 100).toFixed(2);
+    document.getElementById('out-net').textContent = 'Salary to pay: ' + money(Math.round((Number(amount.value) - Number(advanceField.value)) * 100));
+  };
+  personField.addEventListener('change', () => {
+    amount.value = (selected().monthly_salary / 100).toFixed(2);
+    advanceField.value = '0.00';
+    update();
+  });
+  dialog.querySelector('form').addEventListener('input', update);
+  update();
 }
-function outgoingBillForm(model = outgoingData){outgoingForm('Add bill',`<label>Bill type<select name="kind"><option value="supplier">Supplier invoice</option><option value="other">Other bill</option><option value="opening">Opening payable</option></select></label>${contactNameField('Supplier / payee', 'payee', '', {knownNames: model.bills.map(bill => bill.payee)})}${outgoingText('Invoice / bill reference','reference')}${outgoingAmount('Bill amount (₹)','amount')}<div class="money-form-grid">${businessDate('Bill date','bill_date',model.today)}${businessDate('Payment due date','due_date',model.today)}</div><label>Description<textarea name="note" rows="2" maxlength="500" required></textarea></label>`,'/payables/bills',{},'Add bill');}
+function outgoingBillForm(model = outgoingData, name = ''){outgoingForm('Add bill',`<label>Bill type<select name="kind"><option value="supplier">Supplier invoice</option><option value="other">Other bill</option><option value="opening">Opening payable</option></select></label>${contactNameField('Supplier / payee', 'payee', name, {knownNames: model.bills.map(bill => bill.payee)})}${outgoingText('Invoice / bill reference','reference')}${outgoingAmount('Bill amount (₹)','amount')}<div class="money-form-grid">${businessDate('Bill date','bill_date',model.today)}${businessDate('Payment due date','due_date',model.today)}</div><label>Description<textarea name="note" rows="2" maxlength="500" required></textarea></label>`,'/payables/bills',{},'Add bill');}
 
 function shareOutgoingBill(bill) {
   const message = [
@@ -129,9 +211,9 @@ function shareOutgoingBill(bill) {
 function outgoingPayment(kind,source,model=outgoingData){
   const advance=kind==='advance'||kind==='advance_return';
   if(advance&&!model.staff.some(s=>s.active||kind==='advance_return'&&s.advance_balance>0)){moneyDialog('Add staff first','<p>Add an active staff member before recording an advance.</p>');return;}
-  const dialog=outgoingForm(outgoingLabels[kind],`${advance?`<label>Staff member<select name="source_id">${staffOptions(source?.id,kind==='advance_return')}</select></label><p id="out-payment-hint" class="money-form-hint"></p>`:`<div class="money-source"><span>${safe(outgoingParty(source,model))}</span><strong>${money(source.balance)} to pay</strong></div>`}${outgoingAmount(kind==='advance_return'?'Amount returned (₹)':'Amount paid (₹)','amount',advance?'':source.balance)}<div class="money-form-grid">${businessDate('Payment date','paid_on',model.today)}<label>Payment method<select name="method"><option value="bank">Bank / UPI</option><option value="cash">Cash</option></select></label></div>${outgoingText('Unique payment reference','reference')}${outgoingNote()}`,'/outgoings/payments',{kind,...(!advance?{source_id:source.id}:{})},kind==='advance_return'?'Record return':'Record payment');
+  const dialog=outgoingForm(outgoingLabels[kind],`${advance?`<label>Staff member<select name="source_id">${staffOptions(source?.id,kind==='advance_return',model)}</select></label><p id="out-payment-hint" class="money-form-hint"></p>`:`<div class="money-source"><span>${safe(outgoingParty(source,model))}</span><strong>${money(source.balance)} to pay</strong></div>`}${outgoingAmount(kind==='advance_return'?'Amount returned (₹)':'Amount paid (₹)','amount',advance?'':source.balance)}<div class="money-form-grid">${businessDate('Payment date','paid_on',model.today)}<label>Payment method<select name="method"><option value="bank">Bank / UPI</option><option value="cash">Cash</option></select></label></div>${outgoingText('Unique payment reference','reference')}${outgoingNote()}`,'/outgoings/payments',{kind,...(!advance?{source_id:source.id}:{})},kind==='advance_return'?'Record return':'Record payment');
   dialog.querySelector('[name=paid_on]').max=model.today;
-  if(advance){const form=dialog.querySelector('form');const update=()=>{const staff=outgoingStaff(Number(form.elements.source_id.value));dialog.querySelector('#out-payment-hint').textContent=money(staff.advance_balance)+' outstanding in advances.';if(kind==='advance_return')form.elements.amount.max=(staff.advance_balance/100).toFixed(2);};form.elements.source_id.addEventListener('change',update);update();}
+  if(advance){const form=dialog.querySelector('form');const update=()=>{const staff=model.staff.find(person=>person.id===Number(form.elements.source_id.value));dialog.querySelector('#out-payment-hint').textContent=money(staff.advance_balance)+' outstanding in advances.';if(kind==='advance_return')form.elements.amount.max=(staff.advance_balance/100).toFixed(2);};form.elements.source_id.addEventListener('change',update);update();}
 }
 function outgoingDetail(kind,row,model=outgoingData){
   const entry=kind==='entry';const related=entry?[]:model.entries.filter(e=>e[kind==='salary'?'salary_id':'bill_id']===row.id);
@@ -149,7 +231,7 @@ function bindOutgoingActions(scope=document,d=outgoingData){scope.querySelectorA
   const action=button.dataset.action,id=Number(button.dataset.id);
   if(action==='automation')return openAutomation('recurring');
   if(action==='staff-new')return outgoingStaffForm();if(action==='staff-edit')return outgoingStaffForm(outgoingStaff(id));if(action==='salary-new')return outgoingSalaryForm();if(action==='bill-new')return outgoingBillForm();if(action==='advance-new')return outgoingPayment('advance',outgoingStaff(id));if(action==='advance-return')return outgoingPayment('advance_return',outgoingStaff(id));
-  if(action==='help'){moneyDialog(outgoingPage==='payroll'?'How Payroll works':'How bills work',`<div class="money-help-content">${outgoingPage==='payroll'?'<section><h3>Salaries and advances</h3><p>Add staff separately from manager sign-ins. Prepare one earned salary per staff member per month. Monthly salary is a starting amount; enter the actual salary earned.</p></section><section><h3>Recovering advances</h3><p>An advance stays outstanding until returned or applied to a salary. Apply advance when adding a salary to reduce the amount left to pay. No deductions or taxes are calculated automatically.</p></section>':'<section><h3>Supplier and other bills</h3><p>Add the amount owed, bill reference and due date. Record each payment to reduce the balance. Partial payments stay outstanding.</p></section>'}<section><h3>Recorded payments</h3><p>This is a record of payments you have already made. It does not transfer money or change shift cash, fuel sales or customer receipts.</p></section><section><h3>Correct a record</h3><p>Open a record and void it with a reason. Void linked payments before voiding a salary or bill. Reverse advance recovery or returns before voiding a used advance. Originals stay in history.</p></section></div>`);return;}
+  if(action==='help'){moneyDialog(['salaries', 'advances', 'staff'].includes(outgoingTab)?'How Payroll works':'How bills work',`<div class="money-help-content">${['salaries', 'advances', 'staff'].includes(outgoingTab)?'<section><h3>Salaries and advances</h3><p>Add staff separately from manager sign-ins. Prepare one earned salary per staff member per month. Monthly salary is a starting amount; enter the actual salary earned.</p></section><section><h3>Recovering advances</h3><p>An advance stays outstanding until returned or applied to a salary. Apply advance when adding a salary to reduce the amount left to pay. No deductions or taxes are calculated automatically.</p></section>':'<section><h3>Supplier and other bills</h3><p>Add the amount owed, bill reference and due date. Record each payment to reduce the balance. Partial payments stay outstanding.</p></section>'}<section><h3>Recorded payments</h3><p>This is a record of payments you have already made. It does not transfer money or change shift cash, fuel sales or customer receipts.</p></section><section><h3>Correct a record</h3><p>Open a record and void it with a reason. Void linked payments before voiding a salary or bill. Reverse advance recovery or returns before voiding a used advance. Originals stay in history.</p></section></div>`);return;}
   const [kind,verb]=action.split('-'),row=(kind==='salary'?d.salaries:kind==='bill'?d.bills:d.entries).find(r=>r.id===id);
   if(!row)return;
   if(action==='bill-share'&&!row.voided_at)return shareOutgoingBill(row);

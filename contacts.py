@@ -11,7 +11,15 @@ CREATE TABLE IF NOT EXISTS station_contacts (
     name TEXT NOT NULL, name_key TEXT NOT NULL, phone TEXT NOT NULL DEFAULT '',
     UNIQUE(station_id, name_key)
 );
+CREATE TABLE IF NOT EXISTS staff_party_contacts (
+    staff_id INTEGER PRIMARY KEY REFERENCES payroll_staff(id),
+    contact_id INTEGER NOT NULL UNIQUE REFERENCES station_contacts(id)
+);
 """
+
+
+def contact_query(sid):
+    return ("SELECT id, name, name_key, phone FROM station_contacts WHERE station_id = ? ORDER BY name_key", (sid,))
 
 
 def contact_phone(value, fail):
@@ -31,8 +39,8 @@ def contacts_route(db, sid, method, route, body, *, fail, required_note):
     if route != "/contacts":
         return None
     if method == "GET":
-        rows = db.execute("SELECT id, name, phone FROM station_contacts WHERE station_id = ? ORDER BY name_key", (sid,))
-        return {"contacts": list(map(dict, rows))}
+        rows = db.execute(*contact_query(sid))
+        return {"contacts": [{key: row[key] for key in ("id", "name", "phone")} for row in rows]}
     if method == "POST":
         phone = contact_phone(body.get("phone", ""), fail)
         ident = body.get("id")

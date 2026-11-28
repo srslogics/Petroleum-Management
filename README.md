@@ -137,7 +137,7 @@ The owner navigation includes **Money**, **Operations** and **Exceptions** along
 
 ### Customer credit and repayments
 
-In **Money → Record credit**, the owner can add customer credit while a shift is open. Pending entries can be edited or removed until the manager submits the shift. At submission they appear in the Owner report and create customer balances. Customer names are matched without letter case; owners should consistently use the same account name. Use **Add customer** to create an account. Open a customer and choose **Set due date** to update its account-level payment date. Each customer has a transaction statement and CSV download. Outstanding balances past their due date appear in Exceptions.
+In **Ledger → Money tools → To collect**, use **Record fuel credit** while a shift is open. Pending entries can be edited or removed until the manager submits the shift. At submission they appear in the Owner report and create customer balances. Customer names are matched without letter case; owners should consistently use the same account name. Enter the name on the credit sale or choose a saved contact. Open the credit account after submission and choose **Set due date** to update its payment date. Each customer has a transaction statement and CSV download. Outstanding balances past their due date appear in Exceptions.
 
 Credit entered only as a shift total remains visibly **unallocated**. Assign that credit to one or more customers in Money, within the remaining balance, using unique allocation references. Allocations do not change the shift's sales or collections.
 
@@ -173,11 +173,20 @@ Inter Variable 5.3.0 is bundled in `static/fonts` under the adjacent SIL Open Fo
 
 `npm test` checks actual font loading, headings, inputs, buttons, tables, small text, overflow and offline typography across owner and manager screens at 1440px, 1024px, 390px and 320px widths.
 
-### Receivables and Banking
+### Owner Party ledger
 
-**Ledger → To collect** shows the total owed to the station, split into fuel credit and other dues. Existing customer accounts, statements and credit allocation are under **Fuel credit**. Use **Add receivable** for unpaid invoices, supplier refunds, loans or advances to recover, reimbursements, opening balances and other amounts owed. Open a receivable to record partial or full payments. Due dates feed the overdue total and the exception inbox.
+**Ledger** opens a directory of people and businesses. Open a party for one dated transaction history, with separate running balances for money to collect, money to pay, and staff advances. Credit sales, bills, receipts, salary payments, advance recoveries and reversals appear in the same history when they belong to the party. Record a bill, amount owed, or fuel credit from their statement. Staff records can also open salary and advance forms.
 
-**Ledger** is the Owner workspace for collections, bills, and accounting. **To collect** and **To pay** are the entry screens. **Parties** shows what each person or business owes and what the station owes them. **Journal** shows the debit and credit lines behind each posting. **Trial balance** shows the debit or credit balance for each account. The selected **As of date** applies to all three views and their CSV exports. Recorded adjustments produce reversals dated on the day of the correction, leaving the original posting visible.
+Saved contacts collect existing customer and supplier records under the same name. A staff profile stays separate until it is explicitly linked to a saved contact. Use **Link staff to contact** in the staff statement or **Party ledger contact** when editing the staff profile. Linking brings existing salaries and advances into the saved contact’s history. The link follows the staff ID if their payroll name changes.
+
+**Money tools** provides:
+
+- **To collect** for the outstanding work across customers and other receivables.
+- **To pay** for bills, salaries, staff advances, and payment history.
+- **Banking** for UPI and card settlements, cash deposits, and bank statement imports.
+- **Books** for the station Journal and Trial balance. Choose a statement date to view or export historical reports.
+
+Recorded adjustments create dated reversals and leave the original postings visible.
 
 Submitted shifts, outstanding dues, supplier bills, payments, bank settlements, cash deposits and payroll create balanced postings from their source records. Matching an outgoing payment to bank evidence does not post it again. New fuel repayments must fit the available balance on their date and on later dates. Opening receivables and opening payables retain the party balances without creating current income or expenses.
 
@@ -185,19 +194,19 @@ Use **Journal entry** for opening amounts, account adjustments, and valuation su
 
 **Contacts** saves names and optional WhatsApp numbers for the station. The same directory supplies name suggestions in owner money, bill and staff entry forms. WhatsApp opens a draft with the saved number when available. Owners can also save or update a contact from the party ledger.
 
-**Banking** lives under **Station operations**. Use it to confirm UPI and card settlements and reconcile cash deposits. Cash received against a receivable appears as a pending deposit until it is banked.
+Cash received against a receivable appears in **Ledger → Money tools → Banking** as a pending deposit until it is banked.
 
 **Activity** keeps a history in each workspace. To correct an entry, void it with a reason and enter a replacement. Void linked deposits before their cash payments and linked payments before the underlying receivable.
 
 ### Payroll and Payables
 
-Owners can use **Payroll** for staff salaries and advances, and **Ledger → To pay** for supplier invoices and other business bills. Staff are separate from manager login accounts. Both workspaces use the shared typography, focused forms and phone layouts.
+Use **Ledger → Money tools → To pay → Bills** for supplier invoices and other business bills. Use **Salaries**, **Staff advances**, and **Staff** within **To pay** for payroll. Staff profiles are separate from manager login accounts.
 
-In Payroll, add staff with a unique code and optional monthly salary default. Prepare one salary per staff member and month using the actual amount earned. An advance remains outstanding until it is returned or explicitly applied when preparing a salary. The amount applied reduces the salary left to pay. Salary payments may be partial; inactive staff can still receive existing dues or return advances. Changing a staff salary default does not change prepared salaries. Taxes, attendance and statutory deductions are not calculated automatically.
+Under **Staff**, add a staff member with a unique code and optional monthly salary default. Prepare one salary per staff member and month using the actual amount earned. An advance remains outstanding until it is returned or explicitly applied when preparing a salary. The amount applied reduces the salary left to pay. Salary payments may be partial; inactive staff can still receive existing dues or return advances. Changing a staff salary default does not change prepared salaries. Taxes, attendance and statutory deductions are not calculated automatically.
 
-In Ledger → To pay, record a supplier invoice or other bill with its payee, reference, amount, description, bill date and due date. The summary shows outstanding, overdue, due within seven days and payments recorded this month. Each partial payment reduces the remaining balance. The same active invoice reference cannot be entered twice for the same payee (case insensitive).
+Under **Bills**, record a supplier invoice or other bill with its payee, reference, amount, description, bill date and due date. The summary shows outstanding, overdue, due within seven days and payments recorded this month. Each partial payment reduces the remaining balance. The same active invoice reference cannot be entered twice for the same payee (case insensitive).
 
-Payment records require an amount, payment date, cash/bank method and a unique reference across both outgoing ledgers. They record payments already made; they do not transfer funds or modify shift collections, till cash, sales or incoming customer receipts. Advance returns are receipts against the staff advance balance, not bill payments or salary payments.
+Payment records require an amount, payment date, cash/bank method and a unique reference across bill and staff payments. They record payments already made; they do not transfer funds or modify shift collections, till cash, sales or incoming customer receipts. Advance returns are receipts against the staff advance balance, not bill payments or salary payments.
 
 Open a salary, bill or payment to see its details and payment history. To correct an error, void it with a reason and enter a replacement. Void linked payments before voiding their salary or bill; reverse returns or salary recovery before voiding an advance that has been used. Voided records remain in history, and payment references remain reserved to prevent accidental duplicates. A voided salary month or invoice may be replaced. Staff profile edits affect the current staff register; salary and payment amounts retain their original values.
 

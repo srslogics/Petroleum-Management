@@ -184,8 +184,7 @@ function showLogin(message = "") {
 
 const ownerNavigation = [
   ["Station", [["home", "Overview"], ["daily-report", "Daily report"], ["ledger", "Ledger"]]],
-  ["Finances", [["payroll", "Payroll"]]],
-  ["Station operations", [["operations", "Operations"], ["banking", "Banking"], ["exceptions", "Exceptions"], ["automation", "Automation"]]],
+  ["Station operations", [["operations", "Operations"], ["exceptions", "Exceptions"], ["automation", "Automation"]]],
   ["Administration", [["settings", "Settings"], ["contacts", "Contacts"], ["team", "Team"], ["security", "Account security"]]],
 ];
 
@@ -211,7 +210,7 @@ function shell(content, view = "home") {
       <aside class="workspace-sidebar" aria-label="Workspace">
         ${brand()}
         ${role === "manager" ? '<p class="sidebar-caption">Daily operations</p>' : ""}
-        <nav class="app-nav" aria-label="${roleTitle} navigation">${workspaceNavigation(["money", "payables"].includes(view) ? "ledger" : view)}</nav>
+        <nav class="app-nav" aria-label="${roleTitle} navigation">${workspaceNavigation(["money", "payables", "banking"].includes(view) ? "ledger" : view)}</nav>
         <div class="sidebar-footer"><span class="sidebar-role">${roleTitle}</span><div id="sidebar-install"></div></div>
       </aside>
       <div class="workspace-body">
@@ -264,12 +263,8 @@ function shell(content, view = "home") {
     listen("team", openTeam);
     listen("contacts", openContacts);
     listen("automation", () => openAutomation());
-    listen("ledger", () => {
-      ledgerView.tab = "parties";
-      return openBusiness("ledger");
-    });
-    listen("payroll", () => openOutgoings("payroll"));
-    for (const view of ["banking", "operations", "exceptions"]) listen(view, () => openBusiness(view));
+    listen("ledger", () => openLedgerSection("parties"));
+    for (const view of ["operations", "exceptions"]) listen(view, () => openBusiness(view));
   }
 }
 
@@ -633,7 +628,6 @@ function showOwner(data) {
       ${needsOpeningStock ? '<button id="setup-stock" class="secondary" type="button">Confirm opening stock</button>' : ""}
     </div></section>` : ""}
   <section class="owner-quick-actions" aria-label="Quick actions">
-    <button id="quick-customer" class="secondary" type="button">${navigationIcon("money")} Add customer</button>
     <button id="quick-bill" class="secondary" type="button">${navigationIcon("payables")} Add bill</button>
     <button id="quick-salary" class="secondary" type="button">${navigationIcon("payroll")} Add salary</button>
   </section>
@@ -695,9 +689,8 @@ function showOwner(data) {
     </section>
   </div>`);
   bindBusinessOverview();
-  listen("quick-customer", () => openBusiness("money", data => openCustomerForm(data)));
-  listen("quick-bill", () => openOutgoings("payables", outgoingBillForm));
-  listen("quick-salary", () => openOutgoings("payroll", outgoingSalaryForm));
+  listen("quick-bill", () => openOutgoings("bills", outgoingBillForm));
+  listen("quick-salary", () => openOutgoings("salaries", outgoingSalaryForm));
   if (pending) listen("review-next-shift", () => openShiftReport(Math.min(...waiting.map(shift => shift.id))));
   if (missingRates) listen("setup-rates", openSettings);
   if (needsOpeningStock) listen("setup-stock", () => openOpeningStock(data.setup));

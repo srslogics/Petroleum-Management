@@ -1,4 +1,4 @@
-/* Reuse the shared Money workspace and typography across both outgoing ledgers. */
+/* Reuse the shared Money workspace and typography for bills and payroll. */
 .outgoing-table th:first-child { min-width: 160px; }
 .outgoing-table th small { display:block; margin-top:4px; color:var(--muted); font-size:var(--text-small); font-weight:400; }
 .outgoing-net { padding:12px 16px; background:var(--positive-soft); color:var(--positive); border-radius:8px; font-weight:600; font-size:var(--text-section); }
@@ -22,9 +22,9 @@
 }
 .outgoing-mobile-status { display:none !important; }
 @media(max-width:420px) {
- main[data-view="payroll"] .money-stat strong, main[data-view="payables"] .money-stat strong { font-size:var(--text-section); white-space:nowrap; overflow-x:auto; }
+ main[data-view="payables"] .money-stat strong { font-size:var(--text-section); white-space:nowrap; overflow-x:auto; }
 }
 @media(max-width:700px) {
  .outgoing-table .outgoing-mobile-status { display:block !important; }
 }
-main[data-view="payroll"] .money-stat strong, main[data-view="payables"] .money-stat strong { white-space:nowrap; overflow-x:auto; }
+main[data-view="payables"] .money-stat strong { white-space:nowrap; overflow-x:auto; }

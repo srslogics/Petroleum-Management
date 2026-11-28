@@ -1,131 +1,218 @@
 "use strict";
 
 const ledgerView = {tab: 'parties', date: '', search: '', status: 'all', account: ''};
-const ledgerTabs = [['parties', 'Parties'], ['collect', 'To collect'], ['pay', 'To pay'], ['journal', 'Journal'], ['trial', 'Trial balance']];
+const ledgerBookTabs = [['journal', 'Journal'], ['trial', 'Trial balance']];
+const ledgerTools = [['collect', 'To collect'], ['pay', 'To pay'], ['banking', 'Banking'], ['books', 'Books']];
+const ledgerTitles = {parties: 'Party ledger', collect: 'To collect', pay: 'To pay', banking: 'Banking', books: 'Books'};
+const ledgerDescription = {
+  parties: 'Open a person or business to see their transactions and balances.',
+  collect: 'Record fuel credit, other amounts owed and payments received.',
+  pay: 'Manage bills and staff pay, and record payments already made.',
+  banking: 'Confirm cash deposits and UPI or card receipts from the bank.',
+  books: 'Review the journal and trial balance for the station.',
+};
 
-function ledgerWorkspace(active, description, actions, body) {
-  const tabs = ledgerTabs.map(([key, title]) =>
-    `<button id="ledger-tab-${key}" type="button" role="tab" aria-selected="${key === active}"
-      aria-controls="ledger-panel" tabindex="${key === active ? 0 : -1}">${title}</button>`).join('');
-  return `<div class="money-heading"><div>${heading('', 'Ledger', description)}</div>
-    <div class="money-heading-actions">${actions}</div></div>
-    <div class="money-tabs ledger-workspace-tabs" role="tablist" aria-label="Ledger views">${tabs}</div>
-    <div id="ledger-panel" role="tabpanel" aria-labelledby="ledger-tab-${active}">${body}</div>`;
+function ledgerTabButtons(tabs, active, prefix, panel) {
+  return tabs.map(([key, title]) => `
+    <button id="${prefix + key}" type="button" role="tab" aria-selected="${key === active}"
+      aria-controls="${panel}" tabindex="${key === active ? 0 : -1}">${title}</button>`).join('');
 }
 
-function bindLedgerNavigation(active, data) {
-  async function select(tab) {
-    if (tab === active) return;
-    if (tab === 'collect') await openBusiness('money');
-    else if (tab === 'pay') await openOutgoings('payables');
-    else {
-      ledgerView.tab = tab;
-      if (data) showLedger(data);
-      else await openBusiness('ledger');
-    }
-    document.getElementById('ledger-tab-' + tab)?.focus({preventScroll: true});
-  }
-  for (const [index, [key]] of ledgerTabs.entries()) {
-    const id = 'ledger-tab-' + key;
-    listen(id, () => select(key));
+function ledgerWorkspace(active, actions, body) {
+  return `<div class="money-heading">${heading('', ledgerTitles[active], ledgerDescription[active])}
+    <div class="money-heading-actions">${actions}</div>
+    </div>
+    <nav class="ledger-tools" aria-label="Money tools">
+      ${active !== 'parties' ? '<button id="ledger-back" type="button" class="text-button">← Party ledger</button>' : ''}
+      <details>
+        <summary>Money tools</summary>
+        <div class="ledger-tool-links">${ledgerTools.map(([key, label]) => `<button id="ledger-tool-${key}"
+          class="secondary" type="button"${key === active ? ' aria-current="page"' : ''}>${label}</button>`).join('')}</div>
+      </details>
+    </nav>
+    ${body}`;
+}
+
+function bindLedgerTabs(tabs, prefix, active, select) {
+  const activate = async key => {
+    if (key !== active) await select(key);
+    document.getElementById(prefix + key)?.focus({preventScroll: true});
+  };
+  for (const [index, [key]] of tabs.entries()) {
+    const id = prefix + key;
+    listen(id, () => activate(key));
     listen(id, event => {
-      const target = {Home: 0, End: ledgerTabs.length - 1, ArrowRight: (index + 1) % ledgerTabs.length,
-        ArrowLeft: (index + ledgerTabs.length - 1) % ledgerTabs.length}[event.key];
+      const target = {Home: 0, End: tabs.length - 1, ArrowRight: (index + 1) % tabs.length,
+        ArrowLeft: (index + tabs.length - 1) % tabs.length}[event.key];
       if (target === undefined) return;
       event.preventDefault();
-      return select(ledgerTabs[target][0]);
+      return activate(tabs[target][0]);
     }, 'keydown');
   }
 }
 
+function openLedgerSection(tab) {
+  if (tab === 'collect') return openBusiness('money');
+  if (tab === 'pay') return openOutgoings();
+  if (tab === 'banking') return openBusiness('banking');
+  ledgerView.tab = tab === 'books' ? 'journal' : 'parties';
+  return openBusiness('ledger');
+}
+
+function bindLedgerNavigation(active) {
+  if (active !== 'parties') listen('ledger-back', () => openLedgerSection('parties'));
+  for (const [key] of ledgerTools) {
+    listen('ledger-tool-' + key, () => {
+      if (key !== active) return openLedgerSection(key);
+    });
+  }
+}
+
+const partyBalanceLabels = {incoming: 'to collect', outgoing: 'to pay', advances: 'in staff advances'};
+const partyAccountSides = {'1100': 'incoming', '1110': 'incoming', '2000': 'outgoing', '2010': 'outgoing', '1130': 'advances'};
+
 function buildPartyLedger(data) {
   const parties = new Map();
+  const contactsByName = new Map(data.contacts.map(row => [row.name_key, row]));
+  const contactsById = new Map(data.contacts.map(row => [row.id, row]));
+  const staff = new Map(data.staff.map(row => [row.id, row]));
   const customers = new Map(data.customers.map(row => [row.customer_key, row]));
   const bills = new Map(data.bills.map(row => [row.id, row]));
+  const salaries = new Map(data.salaries.map(row => [row.id, row]));
   const receivables = new Map(data.market_receivables.map(row => [row.id, row]));
-  const billPayments = new Map(data.bill_payments.map(row => [row.id, bills.get(row.bill_id)]));
+  const outgoing = new Map([...data.bill_payments, ...data.staff_entries].map(row => [row.id, row]));
   const receipts = new Map(data.market_receipts.map(row => [row.id, receivables.get(row.receivable_id)]));
-  const documents = {bill: bills, 'outgoing-payment': billPayments, receivable: receivables, 'receivable-payment': receipts};
-  for (const entry of data.financial.entries) {
-    const partyLines = new Map();
-    for (const line of entry.lines) {
-      if (!line.party_key) continue;
-      const merged = partyLines.get(line.party_key);
-      partyLines.set(line.party_key, {...line, amount: line.amount + (merged?.amount || 0)});
+  const createParty = (key, name, contact, staffMember) => {
+    if (!parties.has(key)) parties.set(key, {
+      name, contact, staff: staffMember, entries: [], incoming: 0, outgoing: 0, advances: 0,
+      openDocuments: new Map(), fuelBalance: 0, overdue: false,
+      customer: customers.get(contact?.name_key ?? (key.startsWith('name:') ? key.slice(5) : undefined)),
+    });
+    const party = parties.get(key);
+    if (staffMember) party.staff = staffMember;
+    return party;
+  };
+  for (const contact of data.contacts) createParty('contact:' + contact.id, contact.name, contact);
+  for (const person of data.staff) {
+    const contact = contactsById.get(person.contact_id);
+    const key = contact ? 'contact:' + contact.id : 'staff:' + person.id;
+    createParty(key, contact?.name || person.name, contact, person);
+  }
+
+  const documentFor = entry => {
+    switch (entry.source) {
+      case 'bill': return {kind: 'bill', record: bills.get(entry.source_id)};
+      case 'salary':
+      case 'salary-recovery': return {kind: 'salary', record: salaries.get(entry.source_id)};
+      case 'receivable': return {kind: 'receivable', record: receivables.get(entry.source_id)};
+      case 'receivable-payment': return {kind: 'receivable', record: receipts.get(entry.source_id)};
+      case 'outgoing-payment': {
+        const payment = outgoing.get(entry.source_id);
+        if (payment?.bill_id) return {kind: 'bill', record: bills.get(payment.bill_id)};
+        if (payment?.salary_id) return {kind: 'salary', record: salaries.get(payment.salary_id)};
+        return {kind: 'entry', record: payment};
+      }
+      default: return {};
     }
-    for (const line of partyLines.values()) {
-      const {party_key: key, account: code} = line;
-      if (!parties.has(key)) {
-        const customer = customers.get(key);
-        parties.set(key, {name: customer?.name || line.party, customer, entries: [], incoming: 0, outgoing: 0,
-          openDocuments: new Map(), fuelBalance: 0, overdue: false});
+  };
+
+  for (const entry of data.financial.entries) {
+    const person = staff.get(entry.staff_id);
+    const changesByParty = new Map();
+    const document = documentFor(entry);
+    for (const line of entry.lines) {
+      const side = partyAccountSides[line.account];
+      if (!side || (!line.party_key && !person)) continue;
+      const contact = person ? contactsById.get(person.contact_id) : contactsByName.get(line.party_key);
+      const key = contact ? 'contact:' + contact.id : person ? 'staff:' + person.id : 'name:' + line.party_key;
+      const party = createParty(key, contact?.name || person?.name || customers.get(line.party_key)?.name || line.party, contact, person);
+      const delta = side === 'outgoing' ? -line.amount : line.amount;
+      party[side] += delta;
+      if (line.account === '1100') party.fuelBalance += delta;
+      if (document.record?.due_date && side !== 'advances') {
+        const documentKey = document.kind + ':' + document.record.id;
+        const previous = party.openDocuments.get(documentKey)?.balance || 0;
+        party.openDocuments.set(documentKey, {date: document.record.due_date, balance: previous + delta});
       }
-      const party = parties.get(key);
-      const side = code === '2000' ? 'outgoing' : 'incoming';
-      const amount = side === 'outgoing' ? -line.amount : line.amount;
-      party[side] += amount;
-      if (code === '1100') party.fuelBalance += amount;
-      const document = documents[entry.source]?.get(entry.source_id);
-      if (document) {
-        const documentKey = side + ':' + document.id;
-        const prior = party.openDocuments.get(documentKey)?.balance || 0;
-        party.openDocuments.set(documentKey, {date: document.due_date, balance: prior + amount});
-      }
+      if (!changesByParty.has(party)) changesByParty.set(party, {});
+      const changes = changesByParty.get(party);
+      changes[side] = (changes[side] || 0) + delta;
+    }
+    for (const [party, changes] of changesByParty) {
       const type = entry.source === 'shift'
         ? entry.reversal ? 'Reversal · Fuel credit sale' : 'Fuel credit sale'
         : entry.description;
-      party.entries.push({...entry, type, amount, side, balance: party[side],
-        billId: entry.source === 'bill' ? entry.source_id : null,
-        receivable: entry.source === 'receivable' ? document : null});
+      const record = ['bill', 'salary', 'receivable'].includes(entry.source) ? document
+        : entry.source === 'outgoing-payment' ? {kind: 'entry', record: outgoing.get(entry.source_id)} : {};
+      party.entries.push({...entry, type, changes, record,
+        balances: {incoming: party.incoming, outgoing: party.outgoing, advances: party.advances}});
     }
   }
-  const overdue = (date, balance) => date && date < data.financial.as_of && balance > 0;
+  const asOf = data.financial.as_of;
+  const overdue = (date, balance) => date && date < asOf && balance > 0;
   for (const party of parties.values()) {
     party.overdue = overdue(party.customer?.due_date, party.fuelBalance) ||
       [...party.openDocuments.values()].some(item => overdue(item.date, item.balance));
     party.entries.reverse();
   }
-  return [...parties.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return [...parties.values()].filter(party => asOf === data.today || party.entries.length)
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function showLedger(data) {
-  const {financial, today} = data;
-  const parties = buildPartyLedger(data);
-  const collect = parties.reduce((sum, party) => sum + party.incoming, financial.unassigned);
-  const pay = parties.reduce((sum, party) => sum + party.outgoing, 0);
-  const actions = `<button id="ledger-new-bill" class="secondary" type="button">+ Add bill</button>
-    <button id="ledger-new-receivable" class="secondary" type="button">+ Add receivable</button>
-    <button id="ledger-new-journal" class="primary" type="button">+ Journal entry</button>`;
-  const body = `    <form id="ledger-date-form" class="ledger-date-form" aria-label="Statement date">
+function ledgerStatementDate(financial, today) {
+  const current = financial.as_of === today;
+  return `<details class="ledger-statement-date"${current ? '' : ' open'}>
+    <summary>${current ? 'Change statement date' : `Statement as of ${safe(businessDay(financial.as_of, 'medium'))}`}</summary>
+    <form id="ledger-date-form" class="ledger-date-form" aria-label="Statement date">
       <label>As of date<input name="date" type="date" value="${safe(financial.as_of)}" max="${safe(today)}" required></label>
       <button class="secondary">View statement</button>
       ${errorbox}
     </form>
-    <div class="money-stats ledger-stats">
-      <section class="money-stat dues" aria-label="Total to collect"><div>To collect</div><strong>${money(collect)}</strong></section>
-      <section class="money-stat" aria-label="Total to pay"><div>To pay</div><strong>${money(pay)}</strong></section>
-    </div>
+  </details>`;
+}
+
+function showLedger(data) {
+  const {financial, today} = data;
+  const tab = ledgerView.tab;
+  const balances = tab === 'parties';
+  const parties = balances ? buildPartyLedger(data) : [];
+  const statementDate = ledgerStatementDate(financial, today);
+  const actions = balances ? '<button id="ledger-add-contact" class="primary" type="button">+ Add contact</button>'
+    : tab === 'journal' && financial.as_of === today
+      ? '<button id="ledger-new-journal" class="primary" type="button">+ Journal entry</button>' : '';
+  const body = balances ? `${statementDate}
     ${financial.unassigned ? `<div class="money-allocation-alert">
       <div>${navigationIcon('exceptions')}<span><strong>${money(financial.unassigned)} in unassigned fuel credit</strong></span></div>
       ${financial.as_of === today ? '<button id="ledger-assign-credit" class="text-button" type="button">Assign customer</button>' : ''}
     </div>` : ''}
-    <section class="money-workspace" aria-label="Financial ledger">
-      ${ledgerView.tab === 'parties' ? partyList(parties) : ledgerView.tab === 'journal' ? journalPanel(data) : trialBalancePanel(financial)}
-    </section>`;
-  shell(ledgerWorkspace(ledgerView.tab, 'Party balances, journal and trial balance.', actions, body), 'ledger');
+    <section class="money-workspace" aria-label="Party balances">${partyList(parties)}</section>`
+    : `<div class="money-tabs ledger-book-tabs" role="tablist" aria-label="Books">
+        ${ledgerTabButtons(ledgerBookTabs, tab, 'ledger-book-', 'ledger-book-panel')}
+      </div>
+      ${statementDate}
+      <section class="money-workspace" id="ledger-book-panel" role="tabpanel" aria-labelledby="ledger-book-${tab}">
+        ${tab === 'journal' ? journalPanel(data) : trialBalancePanel(financial)}
+      </section>`;
+  shell(ledgerWorkspace(balances ? 'parties' : 'books', actions, body), 'ledger');
   bindForm('ledger-date-form', async form => {
     const prior = ledgerView.date;
     ledgerView.date = form.elements.date.value === today ? '' : form.elements.date.value;
     try { await openBusiness('ledger'); }
     catch (error) { ledgerView.date = prior; throw error; }
   });
-  listen('ledger-new-bill', () => outgoingBillForm(data));
-  listen('ledger-new-receivable', () => openMarketForm(data));
-  listen('ledger-new-journal', () => openManualJournal(data));
-  if (document.getElementById('ledger-assign-credit')) listen('ledger-assign-credit', () => openBusiness('money', openAllocationForm));
-  bindLedgerNavigation(ledgerView.tab, data);
-  if (ledgerView.tab === 'parties') bindPartyList(data, parties);
-  else if (ledgerView.tab === 'journal') bindJournal(data);
+  if (tab === 'journal' && actions) listen('ledger-new-journal', () => openManualJournal(data));
+  bindLedgerNavigation(balances ? 'parties' : 'books');
+  if (balances) {
+    if (document.getElementById('ledger-assign-credit')) listen('ledger-assign-credit', () => openBusiness('money', openAllocationForm));
+    listen('ledger-add-contact', () => openContactForm(null, '', () => openBusiness('ledger')));
+    bindPartyList(data, parties);
+    return;
+  }
+  bindLedgerTabs(ledgerBookTabs, 'ledger-book-', tab, next => {
+    ledgerView.tab = next;
+    showLedger(data);
+  });
+  if (tab === 'journal') bindJournal(data);
   else listen('trial-export', () => ledgerCSV('trial-balance', financial.as_of, [
     ['As of', financial.as_of], ['Code', 'Account', 'Category', 'Debit (INR)', 'Credit (INR)'],
     ...financial.trial.map(row => [row.code, row.name, row.category, row.debit / 100, row.credit / 100]),
@@ -137,7 +224,7 @@ function partyList(parties) {
   return `<div class="money-toolbar"><h2>People and businesses <span id="ledger-count"></span></h2>
       <div class="money-tools">${moneySearch('ledger-search', 'Search names or references', ledgerView.search)}
         <label><span class="sr-only">Ledger status</span><select id="ledger-filter">${moneyOptions([
-          ['all', 'All parties'], ['incoming', 'To collect'], ['outgoing', 'To pay'], ['overdue', 'Overdue']
+          ['all', 'All parties'], ['incoming', 'To collect'], ['outgoing', 'To pay'], ['advances', 'Staff advances'], ['overdue', 'Overdue']
         ], ledgerView.status)}</select></label>
       </div>
     </div>
@@ -145,8 +232,8 @@ function partyList(parties) {
       <thead><tr><th scope="col">Name</th><th scope="col" class="numeric">To collect</th><th scope="col" class="numeric">To pay</th></tr></thead>
       <tbody>${parties.map((party, index) => `<tr data-ledger-row="${index}">
         <th scope="row"><button id="ledger-party-${index}" class="money-source-link market-detail" type="button"
-          aria-label="View ledger for ${safe(party.name)}">${safe(party.name)}<small>${party.overdue ? 'Overdue · ' : ''}${party.entries.length} ${party.entries.length === 1 ? 'entry' : 'entries'}</small></button></th>
-        <td class="numeric"><strong>${money(party.incoming)}</strong></td>
+          aria-label="View ledger for ${safe(party.name)}${party.staff && !party.contact ? ` · Staff ${safe(party.staff.code)}` : ''}"><span class="ledger-party-name">${safe(party.name)}</span><small>${party.overdue ? 'Overdue · ' : ''}${party.entries.length} ${party.entries.length === 1 ? 'entry' : 'entries'}${party.staff ? ' · Staff ' + safe(party.staff.code) : ''}</small></button></th>
+        <td class="numeric"><strong>${money(party.incoming)}</strong>${party.advances ? `<small>${money(party.advances)} staff advances</small>` : ''}</td>
         <td class="numeric"><strong>${money(party.outgoing)}</strong></td>
       </tr>`).join('')}</tbody>
     </table></div><div id="ledger-no-match" hidden>${moneyEmpty('No matching parties', 'Try another search or filter.')}</div>`
@@ -176,40 +263,57 @@ function bindPartyList(data, parties) {
   filter();
 }
 
-async function openPartyLedger(data, party) {
-  const page = document.getElementById('main-content');
-  const contact = matchingContact(await ownerContacts().catch(() => []), party.name);
-  if (!page.isConnected) return;
+function openPartyLedger(data, party) {
+  const contact = party.contact;
   const current = data.financial.as_of === data.today;
+  const showAdvances = party.staff || party.advances;
+  const actions = current && (contact || !party.staff || party.staff.active || party.advances > 0) ? `<details class="ledger-party-actions">
+    <summary>Record a transaction</summary>
+    <div class="money-account-actions">
+      ${contact || !party.staff ? `<button id="party-add-receivable" type="button" class="secondary">Record money owed</button>
+      <button id="party-add-bill" type="button" class="secondary">Add bill</button>
+      <button id="party-add-credit" type="button" class="secondary">${data.active ? 'Record fuel credit' : 'Fuel credit options'}</button>` : ''}
+      ${party.staff?.active ? '<button id="party-add-salary" type="button" class="secondary">Add salary</button><button id="party-add-advance" type="button" class="secondary">Give advance</button>' : ''}
+      ${party.advances > 0 ? '<button id="party-return-advance" type="button" class="secondary">Record advance return</button>' : ''}
+    </div>
+    </details>` : '';
   moneyDialog(party.name + ' · Ledger', `<p class="money-dialog-intro">As of ${safe(businessDay(data.financial.as_of, 'long'))}</p>
     <dl class="ledger-balances">
       <div><dt>To collect</dt><dd>${money(party.incoming)}</dd></div>
       <div><dt>To pay</dt><dd>${money(party.outgoing)}</dd></div>
+      ${showAdvances ? `<div><dt>Staff advances</dt><dd>${money(party.advances)}</dd></div>` : ''}
     </dl>
     <div class="money-account-actions">
       <button id="ledger-party-export" class="secondary" type="button">Export statement</button>
       ${contact?.phone && current ? '<button id="ledger-whatsapp" class="secondary" type="button">WhatsApp</button>' : ''}
-      <button id="ledger-contact" class="secondary" type="button">${contact ? 'Edit contact' : 'Save contact'}</button>
+      ${contact || !party.staff ? `<button id="ledger-contact" class="secondary" type="button">${contact ? 'Edit contact' : 'Save contact'}</button>` : ''}
+      ${party.staff && current ? `<button id="ledger-staff-contact" class="secondary" type="button">${contact ? 'Edit staff profile' : 'Link staff to contact'}</button>` : ''}
       ${party.customer && current ? '<button id="ledger-fuel-credit" class="secondary" type="button">Fuel credit account</button>' : ''}
     </div>
+    ${actions}
     <h3>Transactions</h3>
-    <ul class="ledger-entries">${party.entries.map((row, index) => `<li>
+    ${party.entries.length ? `<ul class="ledger-entries">${party.entries.map((row, index) => `<li>
       <div><strong>${safe(row.type)}</strong>${row.reversal ? moneyBadge('Reversal', 'warning') : ''}
         <small>${safe(businessDay(row.date, 'medium'))} · ${safe(row.reference)}</small>
         ${row.reason || row.note ? `<small>${safe(row.reason || row.note)}</small>` : ''}
-        ${row.receivable && current && !row.reversal ? `<button id="ledger-due-${index}" class="text-button" type="button">Open receivable</button>` : ''}
-        ${row.billId && current && !row.reversal ? `<button id="ledger-bill-${index}" class="text-button" type="button">Open bill</button>` : ''}
+        ${current && row.record.record && !row.reversal ? `<button id="ledger-record-${index}" class="text-button" type="button">Open ${row.record.kind === 'entry' ? 'payment' : row.record.kind}</button>` : ''}
       </div>
-      <div><strong>${row.amount < 0 ? '−' : '+'}${money(Math.abs(row.amount))}</strong>
-        <small>${money(row.balance)} ${row.side === 'incoming' ? 'to collect' : 'to pay'}</small></div>
-    </li>`).join('')}</ul>`, true);
+      <div>${Object.entries(row.changes).map(([side, amount]) => `<div>
+        <strong>${amount < 0 ? '−' : '+'}${money(Math.abs(amount))}</strong>
+        <small>${money(row.balances[side])} ${partyBalanceLabels[side]}</small>
+      </div>`).join('')}</div>
+    </li>`).join('')}</ul>` : '<p class="quiet">No transactions yet.</p>'}`, true);
   listen('ledger-party-export', () => ledgerCSV('party-statement', data.financial.as_of, [
     ['Party', party.name], ['As of', data.financial.as_of], ['To collect (INR)', party.incoming / 100], ['To pay (INR)', party.outgoing / 100],
-    ['Date', 'Reference', 'Entry', 'Direction', 'Amount (INR)', 'Running balance (INR)', 'Notes'],
-    ...party.entries.slice().reverse().map(row => [row.date, row.reference, row.type, row.side,
-      row.amount / 100, row.balance / 100, row.reason || row.note || ''])
+    ['Staff advances (INR)', party.advances / 100],
+    ['Date', 'Reference', 'Entry', 'Change to collect (INR)', 'Change to pay (INR)', 'Change to advances (INR)',
+      'To collect balance (INR)', 'To pay balance (INR)', 'Staff advance balance (INR)', 'Notes'],
+    ...party.entries.slice().reverse().map(row => [row.date, row.reference, row.type,
+      ...['incoming', 'outgoing', 'advances'].map(side => (row.changes[side] || 0) / 100),
+      ...['incoming', 'outgoing', 'advances'].map(side => row.balances[side] / 100), row.reason || row.note || ''])
   ]));
-  listen('ledger-contact', () => openContactForm(contact, party.name, () => openBusiness('ledger')));
+  if (contact || !party.staff) listen('ledger-contact', () => openContactForm(contact, party.name, () => openBusiness('ledger')));
+  if (party.staff && current) listen('ledger-staff-contact', () => outgoingStaffForm(party.staff));
   if (party.customer && current) listen('ledger-fuel-credit', () => openCustomerAccount(data, party.customer));
   if (contact?.phone && current) listen('ledger-whatsapp', () => {
     const message = party.incoming > 0
@@ -217,17 +321,25 @@ async function openPartyLedger(data, party) {
       : '';
     openWhatsAppComposer(message, 'Message ' + contact.name, contact.name, contact.phone);
   });
-  if (current) {
-    const bills = new Map(data.bills.map(bill => [bill.id, bill]));
-    const billModel = {bills: data.bills, entries: data.bill_payments, staff: [], today: data.today};
-    for (const [index, row] of party.entries.entries()) {
-      if (row.reversal) continue;
-      if (row.receivable) listen('ledger-due-' + index, () => openMarketDetail(data, row.receivable));
-      if (row.billId) listen('ledger-bill-' + index, () => {
-        const bill = bills.get(row.billId);
-        if (bill) outgoingDetail('bill', bill, billModel);
-      });
-    }
+  if (!current) return;
+  if (contact || !party.staff) {
+    listen('party-add-receivable', () => openMarketForm(data, party.name));
+    listen('party-add-bill', () => outgoingBillForm(data, party.name));
+    listen('party-add-credit', () => openShiftCredit(data, null, party.name));
+  }
+  const outgoingModel = {...data, entries: [...data.bill_payments, ...data.staff_entries]};
+  if (party.staff?.active) {
+    listen('party-add-salary', () => outgoingSalaryForm(party.staff.id, data));
+    listen('party-add-advance', () => outgoingPayment('advance', party.staff, outgoingModel));
+  }
+  if (party.advances > 0) listen('party-return-advance', () => outgoingPayment('advance_return', party.staff, outgoingModel));
+  for (const [index, row] of party.entries.entries()) {
+    if (row.reversal || !row.record.record) continue;
+    const {kind, record} = row.record;
+    listen('ledger-record-' + index, () => {
+      if (kind === 'receivable') openMarketDetail(data, record);
+      else outgoingDetail(kind, record, outgoingModel);
+    });
   }
 }
 

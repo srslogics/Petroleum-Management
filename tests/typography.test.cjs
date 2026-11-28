@@ -140,13 +140,15 @@ test('typography stays consistent across roles, reports, phone layouts and offli
   await submitted.getByRole('button',{name:'Open shift 1 report'}).waitFor();
   for (const name of ['Daily report','Ledger','Receivables','Payroll','Payables','Automation','Operations','Banking','Exceptions','Settings','Contacts','Team']) {
     await page.setViewportSize({width:1440,height:1000});
-    const financeTab = {Receivables:'To collect', Payables:'To pay'}[name];
+    const financeTab = {Receivables:'To collect', Payables:'To pay', Payroll:'To pay', Banking:'Banking'}[name];
     await page.getByRole('button',{name:financeTab ? 'Ledger' : name,exact:true}).click();
     if (financeTab) {
-      await page.getByRole('tab',{name:financeTab,exact:true}).click();
-      await page.getByRole('tab',{name:financeTab,exact:true,selected:true}).waitFor();
+      await page.getByRole('navigation',{name:'Money tools'}).getByText('Money tools',{exact:true}).click();
+      await page.getByRole('button',{name:financeTab,exact:true}).click();
+      await page.getByRole('heading',{name:financeTab,exact:true,level:1}).waitFor();
+      if (name === 'Payroll') await page.getByRole('tab',{name:'Salaries',exact:true}).click();
     }
-    await page.locator('h1').filter({hasText:financeTab ? 'Ledger' : name === 'Settings' ? 'Station settings' : name === 'Exceptions' ? 'Exception inbox' : name}).waitFor();
+    await page.locator('h1').filter({hasText:financeTab || (name === 'Ledger' ? 'Party ledger' : name === 'Settings' ? 'Station settings' : name === 'Exceptions' ? 'Exception inbox' : name)}).waitFor();
 
     await audit('owner-'+name.toLowerCase().replace(' ','-'),{table:['Receivables','Daily report','Ledger'].includes(name)});
     if (name === 'Automation') assert.ok(await page.locator('.auto-tabs').evaluate(tabs => tabs.scrollWidth <= tabs.clientWidth + 1));

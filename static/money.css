@@ -213,7 +213,11 @@
   .ledger-balances > div { padding: 10px; }
 }
 
-.ledger-date-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin: 0 0 20px; }
+.ledger-statement-date { margin: 0 0 16px; }
+.ledger-statement-date > summary { width: fit-content; padding: 9px 0; cursor: pointer; color: var(--accent); }
+.ledger-date-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-top: 9px; }
+.ledger-book-tabs { flex-wrap: wrap; margin-bottom: 12px; }
+.outgoing-summary { margin: 10px 0 0; }
 .ledger-date-form .form-error:empty { display: none; }
 .ledger-date-form .form-error { flex-basis: 100%; }
 .ledger-account-note { color: var(--muted); padding: 14px 22px; border-top: 1px solid var(--line); }
@@ -231,19 +235,17 @@
   .ledger-account-note, .journal-list > li { padding-inline: 16px; }
 }
 
-.ledger-workspace-tabs {
-  flex-wrap: wrap;
-  column-gap: clamp(14px, 3vw, 28px);
-  row-gap: 0;
-  border-bottom: 1px solid var(--line);
-  margin: 0 0 20px;
-}
-.ledger-workspace-tabs > button { white-space: nowrap; padding-block: 11px 10px; }
-@media (max-width: 760px) {
-  .ledger-workspace-tabs { justify-content: flex-start; }
-}
-@media (max-width: 400px) {
-  .ledger-workspace-tabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); column-gap: 8px; }
-  .ledger-workspace-tabs > button { grid-column: span 2; justify-content: center; }
-  .ledger-workspace-tabs > button:nth-last-child(-n+2) { grid-column: span 3; }
+.ledger-tools { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 18px; margin: 0 0 14px; }
+.ledger-tools > details { max-width: 100%; }
+.ledger-tools > details > summary, .ledger-party-actions > summary { color: var(--accent); cursor: pointer; padding: 10px 0; }
+.ledger-tool-links { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 0 8px; }
+.ledger-tool-links > button { min-height: 44px; }
+.ledger-party-actions { margin-bottom: 16px; }
+.ledger-party-actions > .money-account-actions { margin-bottom: 10px; }
+.ledger-entries > li > div:last-child { max-width: 52%; }
+.ledger-entries > li > div:last-child > div + div { margin-top: 6px; }
+#party-ledger-table td small { display: block; overflow-wrap: anywhere; white-space: normal; }
+.ledger-party-name { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+@media (min-width: 761px) {
+  [aria-label="Party balances"] .money-search { width: min(290px, 100%); }
 }
