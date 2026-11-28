@@ -175,9 +175,9 @@ Inter Variable 5.3.0 is bundled in `static/fonts` under the adjacent SIL Open Fo
 
 ### Receivables and Banking
 
-**Receivables** shows the total owed to the station, split into fuel credit and other dues. Existing customer accounts, statements and credit allocation are under **Fuel credit**. Use **Add receivable** for unpaid invoices, supplier refunds, loans or advances to recover, reimbursements, opening balances and other amounts owed. Open a receivable to record partial or full payments. Due dates feed the overdue total and the exception inbox.
+**Ledger → To collect** shows the total owed to the station, split into fuel credit and other dues. Existing customer accounts, statements and credit allocation are under **Fuel credit**. Use **Add receivable** for unpaid invoices, supplier refunds, loans or advances to recover, reimbursements, opening balances and other amounts owed. Open a receivable to record partial or full payments. Due dates feed the overdue total and the exception inbox.
 
-**Ledger** is the Owner accounting workspace. **Parties** shows what each person or business owes and what the station owes them. **Journal** shows the debit and credit lines behind each posting. **Trial balance** shows the debit or credit balance for each account. The selected **As of date** applies to all three views and their CSV exports. Recorded adjustments produce reversals dated on the day of the correction, leaving the original posting visible.
+**Ledger** is the Owner workspace for collections, bills, and accounting. **To collect** and **To pay** are the entry screens. **Parties** shows what each person or business owes and what the station owes them. **Journal** shows the debit and credit lines behind each posting. **Trial balance** shows the debit or credit balance for each account. The selected **As of date** applies to all three views and their CSV exports. Recorded adjustments produce reversals dated on the day of the correction, leaving the original posting visible.
 
 Submitted shifts, outstanding dues, supplier bills, payments, bank settlements, cash deposits and payroll create balanced postings from their source records. Matching an outgoing payment to bank evidence does not post it again. New fuel repayments must fit the available balance on their date and on later dates. Opening receivables and opening payables retain the party balances without creating current income or expenses.
 
@@ -191,11 +191,11 @@ Use **Journal entry** for opening amounts, account adjustments, and valuation su
 
 ### Payroll and Payables
 
-Owners can use **Payroll** for staff salaries and advances, and **Payables** for supplier invoices and other business bills. Staff are separate from manager login accounts. Both workspaces use the shared typography, focused forms and phone layouts.
+Owners can use **Payroll** for staff salaries and advances, and **Ledger → To pay** for supplier invoices and other business bills. Staff are separate from manager login accounts. Both workspaces use the shared typography, focused forms and phone layouts.
 
 In Payroll, add staff with a unique code and optional monthly salary default. Prepare one salary per staff member and month using the actual amount earned. An advance remains outstanding until it is returned or explicitly applied when preparing a salary. The amount applied reduces the salary left to pay. Salary payments may be partial; inactive staff can still receive existing dues or return advances. Changing a staff salary default does not change prepared salaries. Taxes, attendance and statutory deductions are not calculated automatically.
 
-In Payables, record a supplier invoice or other bill with its payee, reference, amount, description, bill date and due date. The summary shows outstanding, overdue, due within seven days and payments recorded this month. Each partial payment reduces the remaining balance. The same active invoice reference cannot be entered twice for the same payee (case insensitive).
+In Ledger → To pay, record a supplier invoice or other bill with its payee, reference, amount, description, bill date and due date. The summary shows outstanding, overdue, due within seven days and payments recorded this month. Each partial payment reduces the remaining balance. The same active invoice reference cannot be entered twice for the same payee (case insensitive).
 
 Payment records require an amount, payment date, cash/bank method and a unique reference across both outgoing ledgers. They record payments already made; they do not transfer funds or modify shift collections, till cash, sales or incoming customer receipts. Advance returns are receipts against the staff advance balance, not bill payments or salary payments.
 

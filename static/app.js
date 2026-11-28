@@ -184,7 +184,7 @@ function showLogin(message = "") {
 
 const ownerNavigation = [
   ["Station", [["home", "Overview"], ["daily-report", "Daily report"], ["ledger", "Ledger"]]],
-  ["Finances", [["money", "Receivables"], ["payables", "Payables"], ["payroll", "Payroll"]]],
+  ["Finances", [["payroll", "Payroll"]]],
   ["Station operations", [["operations", "Operations"], ["banking", "Banking"], ["exceptions", "Exceptions"], ["automation", "Automation"]]],
   ["Administration", [["settings", "Settings"], ["contacts", "Contacts"], ["team", "Team"], ["security", "Account security"]]],
 ];
@@ -211,7 +211,7 @@ function shell(content, view = "home") {
       <aside class="workspace-sidebar" aria-label="Workspace">
         ${brand()}
         ${role === "manager" ? '<p class="sidebar-caption">Daily operations</p>' : ""}
-        <nav class="app-nav" aria-label="${roleTitle} navigation">${workspaceNavigation(view)}</nav>
+        <nav class="app-nav" aria-label="${roleTitle} navigation">${workspaceNavigation(["money", "payables"].includes(view) ? "ledger" : view)}</nav>
         <div class="sidebar-footer"><span class="sidebar-role">${roleTitle}</span><div id="sidebar-install"></div></div>
       </aside>
       <div class="workspace-body">
@@ -264,8 +264,12 @@ function shell(content, view = "home") {
     listen("team", openTeam);
     listen("contacts", openContacts);
     listen("automation", () => openAutomation());
-    for (const view of ["payroll", "payables"]) listen(view, () => openOutgoings(view));
-    for (const view of ["ledger", "money", "banking", "operations", "exceptions"]) listen(view, () => openBusiness(view));
+    listen("ledger", () => {
+      ledgerView.tab = "parties";
+      return openBusiness("ledger");
+    });
+    listen("payroll", () => openOutgoings("payroll"));
+    for (const view of ["banking", "operations", "exceptions"]) listen(view, () => openBusiness(view));
   }
 }
 
