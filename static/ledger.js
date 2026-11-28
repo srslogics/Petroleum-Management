@@ -1,117 +1,160 @@
 "use strict";
 
-const ledgerView = {search: '', status: 'all'};
+const ledgerView = {tab: 'parties', date: '', search: '', status: 'all', account: ''};
+const ledgerTabs = [['parties', 'Parties'], ['journal', 'Journal'], ['trial', 'Trial balance']];
 
 function buildPartyLedger(data) {
-  const accounts = new Map();
-  const byReceivable = new Map();
-  const byBill = new Map();
-  const accountFor = (name, key) => {
-    if (!accounts.has(key)) accounts.set(key, {name, entries: [], incoming: 0, outgoing: 0, overdue: false});
-    return accounts.get(key);
-  };
-
-  for (const customer of data.customers) {
-    const account = accountFor(customer.name, customer.customer_key);
-    account.customer = customer;
-    account.overdue ||= customer.overdue;
-    for (const row of customer.transactions) {
-      account.entries.push({...row, side: 'incoming', type: row.amount < 0 ? 'Fuel credit payment' : 'Fuel credit sale'});
+  const parties = new Map();
+  const customers = new Map(data.customers.map(row => [row.customer_key, row]));
+  const bills = new Map(data.bills.map(row => [row.id, row]));
+  const receivables = new Map(data.market_receivables.map(row => [row.id, row]));
+  const billPayments = new Map(data.bill_payments.map(row => [row.id, bills.get(row.bill_id)]));
+  const receipts = new Map(data.market_receipts.map(row => [row.id, receivables.get(row.receivable_id)]));
+  const documents = {bill: bills, 'outgoing-payment': billPayments, receivable: receivables, 'receivable-payment': receipts};
+  for (const entry of data.financial.entries) {
+    const partyLines = new Map();
+    for (const line of entry.lines) {
+      if (!line.party_key) continue;
+      const merged = partyLines.get(line.party_key);
+      partyLines.set(line.party_key, {...line, amount: line.amount + (merged?.amount || 0)});
+    }
+    for (const line of partyLines.values()) {
+      const {party_key: key, account: code} = line;
+      if (!parties.has(key)) {
+        const customer = customers.get(key);
+        parties.set(key, {name: customer?.name || line.party, customer, entries: [], incoming: 0, outgoing: 0,
+          openDocuments: new Map(), fuelBalance: 0, overdue: false});
+      }
+      const party = parties.get(key);
+      const side = code === '2000' ? 'outgoing' : 'incoming';
+      const amount = side === 'outgoing' ? -line.amount : line.amount;
+      party[side] += amount;
+      if (code === '1100') party.fuelBalance += amount;
+      const document = documents[entry.source]?.get(entry.source_id);
+      if (document) {
+        const documentKey = side + ':' + document.id;
+        const prior = party.openDocuments.get(documentKey)?.balance || 0;
+        party.openDocuments.set(documentKey, {date: document.due_date, balance: prior + amount});
+      }
+      const type = entry.source === 'shift'
+        ? entry.reversal ? 'Reversal · Fuel credit sale' : 'Fuel credit sale'
+        : entry.description;
+      party.entries.push({...entry, type, amount, side, balance: party[side],
+        billId: entry.source === 'bill' ? entry.source_id : null,
+        receivable: entry.source === 'receivable' ? document : null});
     }
   }
-  for (const row of data.repayments) {
-    const account = accounts.get(row.customer_key);
-    if (!row.void || !account) continue;
-    account.entries.push({date: row.paid_on, side: 'incoming', type: 'Fuel credit payment', amount: -row.amount,
-      reference: row.reference, note: row.note, void: row.void});
+  const overdue = (date, balance) => date && date < data.financial.as_of && balance > 0;
+  for (const party of parties.values()) {
+    party.overdue = overdue(party.customer?.due_date, party.fuelBalance) ||
+      [...party.openDocuments.values()].some(item => overdue(item.date, item.balance));
+    party.entries.reverse();
   }
-  for (const item of data.market_receivables) {
-    const account = accountFor(item.party, item.party_key);
-    byReceivable.set(item.id, account);
-    account.overdue ||= item.overdue;
-    account.entries.push({date: item.recorded_on, side: 'incoming', type: marketKinds[item.kind], amount: item.amount,
-      reference: item.reference, note: item.note, receivable: item, void: item.void});
-  }
-  for (const row of data.market_receipts) {
-    byReceivable.get(row.receivable_id).entries.push({date: row.paid_on, side: 'incoming', type: 'Receivable payment', amount: -row.amount,
-      reference: row.reference, note: row.note, void: row.void});
-  }
-  for (const bill of data.bills) {
-    const account = accountFor(bill.payee, bill.payee_key);
-    byBill.set(bill.id, account);
-    account.overdue ||= bill.overdue;
-    account.entries.push({date: bill.bill_date, side: 'outgoing', type: bill.kind === 'supplier' ? 'Supplier invoice' : 'Bill',
-      amount: bill.amount, reference: bill.reference, note: bill.note, billId: bill.id, void: bill.voided_at});
-  }
-  for (const row of data.bill_payments) {
-    byBill.get(row.bill_id).entries.push({date: row.paid_on, side: 'outgoing', type: 'Bill payment', amount: -row.amount,
-      reference: row.reference, note: row.note, void: row.voided_at});
-  }
-  for (const account of accounts.values()) {
-    account.entries.sort((a, b) => a.date.localeCompare(b.date) || Number(a.amount < 0) - Number(b.amount < 0));
-    for (const row of account.entries) {
-      if (!row.void) account[row.side] += row.amount;
-      row.balance = account[row.side];
-    }
-    account.entries.reverse();
-  }
-  return [...accounts.values()].sort((a, b) => Number(b.incoming + b.outgoing > 0) - Number(a.incoming + a.outgoing > 0) ||
-    a.name.localeCompare(b.name));
+  return [...parties.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function showLedger(data) {
-  const accounts = buildPartyLedger(data);
-  const collect = accounts.reduce((sum, account) => sum + account.incoming, 0) + data.unallocated_credit;
-  const pay = accounts.reduce((sum, account) => sum + account.outgoing, 0);
-  shell(`<div class="money-heading"><div>${heading('', 'Ledger', 'See what each person or business owes you and what you owe them.')}</div>
-    <div class="money-heading-actions">
-      <button id="ledger-new-bill" class="secondary" type="button">+ Add bill</button>
-      <button id="ledger-new-receivable" class="primary" type="button">+ Add receivable</button>
-    </div></div>
+  const {financial, today} = data;
+  const parties = buildPartyLedger(data);
+  const collect = parties.reduce((sum, party) => sum + party.incoming, financial.unassigned);
+  const pay = parties.reduce((sum, party) => sum + party.outgoing, 0);
+  const tabs = ledgerTabs.map(([key, title]) =>
+    `<button id="ledger-tab-${key}" type="button" role="tab" aria-selected="${key === ledgerView.tab}"
+      aria-controls="ledger-panel" tabindex="${key === ledgerView.tab ? 0 : -1}">${title}</button>`).join('');
+  shell(`<div class="money-heading"><div>${heading('', 'Ledger', 'Party balances, double-entry journal and trial balance.')}</div>
+      <div class="money-heading-actions">
+        <button id="ledger-new-bill" class="secondary" type="button">+ Add bill</button>
+        <button id="ledger-new-receivable" class="secondary" type="button">+ Add receivable</button>
+        <button id="ledger-new-journal" class="primary" type="button">+ Journal entry</button>
+      </div>
+    </div>
+    <form id="ledger-date-form" class="ledger-date-form" aria-label="Statement date">
+      <label>As of date<input name="date" type="date" value="${safe(financial.as_of)}" max="${safe(today)}" required></label>
+      <button class="secondary">View statement</button>
+      ${errorbox}
+    </form>
     <div class="money-stats ledger-stats">
       <section class="money-stat dues" aria-label="Total to collect"><div>To collect</div><strong>${money(collect)}</strong></section>
       <section class="money-stat" aria-label="Total to pay"><div>To pay</div><strong>${money(pay)}</strong></section>
     </div>
-    ${data.unallocated_credit ? `<div class="money-allocation-alert">
-      <div>${navigationIcon('exceptions')}<span><strong>${money(data.unallocated_credit)} in unassigned fuel credit</strong></span></div>
-      <button id="ledger-assign-credit" class="text-button" type="button">Assign customer</button>
+    ${financial.unassigned ? `<div class="money-allocation-alert">
+      <div>${navigationIcon('exceptions')}<span><strong>${money(financial.unassigned)} in unassigned fuel credit</strong></span></div>
+      ${financial.as_of === today ? '<button id="ledger-assign-credit" class="text-button" type="button">Assign customer</button>' : ''}
     </div>` : ''}
-    <section class="money-workspace" aria-label="Party ledger">
-      <div class="money-toolbar"><h2>People and businesses <span id="ledger-count"></span></h2>
-        <div class="money-tools">${moneySearch('ledger-search', 'Search names or references', ledgerView.search)}
-          <label><span class="sr-only">Ledger status</span><select id="ledger-filter">${moneyOptions([
-            ['all', 'All parties'], ['incoming', 'To collect'], ['outgoing', 'To pay'], ['overdue', 'Overdue']
-          ], ledgerView.status)}</select></label>
-        </div>
-      </div>
-      ${accounts.length ? `<div class="table-scroll money-table-wrap" id="party-ledger-table"><table class="money-table">
-        <thead><tr><th scope="col">Name</th><th scope="col" class="numeric">To collect</th><th scope="col" class="numeric">To pay</th></tr></thead>
-        <tbody>${accounts.map((item, index) => `<tr data-ledger-row="${index}">
-          <th scope="row"><button id="ledger-party-${index}" class="money-source-link market-detail" type="button"
-            aria-label="View ledger for ${safe(item.name)}">${safe(item.name)}<small>${item.overdue ? 'Overdue · ' : ''}${item.entries.length} ${item.entries.length === 1 ? 'entry' : 'entries'}</small></button></th>
-          <td class="numeric"><strong>${money(item.incoming)}</strong></td>
-          <td class="numeric"><strong>${money(item.outgoing)}</strong></td>
-        </tr>`).join('')}</tbody>
-      </table></div><div id="ledger-no-match" hidden>${moneyEmpty('No matching parties', 'Try another search or filter.')}</div>`
-        : moneyEmpty('No ledger entries yet', 'Recorded fuel credit, receivables and bills will appear here.')}
+    <section class="money-workspace" aria-label="Financial ledger">
+      <div class="money-workspace-top"><div class="money-tabs" role="tablist" aria-label="Ledger views">${tabs}</div></div>
+      <div id="ledger-panel" role="tabpanel" aria-labelledby="ledger-tab-${ledgerView.tab}">${ledgerView.tab === 'parties'
+        ? partyList(parties, data) : ledgerView.tab === 'journal' ? journalPanel(data) : trialBalancePanel(financial)}</div>
     </section>`, 'ledger');
+  bindForm('ledger-date-form', async form => {
+    const prior = ledgerView.date;
+    ledgerView.date = form.elements.date.value === today ? '' : form.elements.date.value;
+    try { await openBusiness('ledger'); }
+    catch (error) { ledgerView.date = prior; throw error; }
+  });
   listen('ledger-new-bill', () => openOutgoings('payables', outgoingBillForm));
   listen('ledger-new-receivable', () => openBusiness('money', openMarketForm));
-  if (data.unallocated_credit) listen('ledger-assign-credit', () => openBusiness('money', openAllocationForm));
-  for (const [index, account] of accounts.entries()) listen('ledger-party-' + index, () => openPartyLedger(data, account));
+  listen('ledger-new-journal', () => openManualJournal(data));
+  if (document.getElementById('ledger-assign-credit')) listen('ledger-assign-credit', () => openBusiness('money', openAllocationForm));
+  for (const [index, [key]] of ledgerTabs.entries()) {
+    const control = document.getElementById('ledger-tab-' + key);
+    const select = tab => {
+      ledgerView.tab = tab;
+      showLedger(data);
+      document.getElementById('ledger-tab-' + tab).focus({preventScroll: true});
+    };
+    control.addEventListener('click', () => select(key));
+    control.addEventListener('keydown', event => {
+      const target = {Home: 0, End: ledgerTabs.length - 1, ArrowRight: (index + 1) % ledgerTabs.length,
+        ArrowLeft: (index + ledgerTabs.length - 1) % ledgerTabs.length}[event.key];
+      if (target === undefined) return;
+      event.preventDefault();
+      select(ledgerTabs[target][0]);
+    });
+  }
+  if (ledgerView.tab === 'parties') bindPartyList(data, parties);
+  else if (ledgerView.tab === 'journal') bindJournal(data);
+  else listen('trial-export', () => ledgerCSV('trial-balance', financial.as_of, [
+    ['As of', financial.as_of], ['Code', 'Account', 'Category', 'Debit (INR)', 'Credit (INR)'],
+    ...financial.trial.map(row => [row.code, row.name, row.category, row.debit / 100, row.credit / 100]),
+    ['', 'Totals', '', financial.total_debit / 100, financial.total_credit / 100]
+  ]));
+}
 
+function partyList(parties) {
+  return `<div class="money-toolbar"><h2>People and businesses <span id="ledger-count"></span></h2>
+      <div class="money-tools">${moneySearch('ledger-search', 'Search names or references', ledgerView.search)}
+        <label><span class="sr-only">Ledger status</span><select id="ledger-filter">${moneyOptions([
+          ['all', 'All parties'], ['incoming', 'To collect'], ['outgoing', 'To pay'], ['overdue', 'Overdue']
+        ], ledgerView.status)}</select></label>
+      </div>
+    </div>
+    ${parties.length ? `<div class="table-scroll money-table-wrap" id="party-ledger-table"><table class="money-table">
+      <thead><tr><th scope="col">Name</th><th scope="col" class="numeric">To collect</th><th scope="col" class="numeric">To pay</th></tr></thead>
+      <tbody>${parties.map((party, index) => `<tr data-ledger-row="${index}">
+        <th scope="row"><button id="ledger-party-${index}" class="money-source-link market-detail" type="button"
+          aria-label="View ledger for ${safe(party.name)}">${safe(party.name)}<small>${party.overdue ? 'Overdue · ' : ''}${party.entries.length} ${party.entries.length === 1 ? 'entry' : 'entries'}</small></button></th>
+        <td class="numeric"><strong>${money(party.incoming)}</strong></td>
+        <td class="numeric"><strong>${money(party.outgoing)}</strong></td>
+      </tr>`).join('')}</tbody>
+    </table></div><div id="ledger-no-match" hidden>${moneyEmpty('No matching parties', 'Try another search or filter.')}</div>`
+    : moneyEmpty('No ledger entries yet', 'Recorded fuel credit, receivables and bills will appear here.')}`;
+}
+
+function bindPartyList(data, parties) {
+  for (const [index, party] of parties.entries()) listen('ledger-party-' + index, () => openPartyLedger(data, party));
   const filter = () => {
     const query = contactKey(ledgerView.search);
     const status = ledgerView.status;
     let count = 0;
     for (const row of document.querySelectorAll('[data-ledger-row]')) {
-      const account = accounts[Number(row.dataset.ledgerRow)];
-      const matches = !query || contactKey(account.name).includes(query) || account.entries.some(entry => contactKey(entry.reference).includes(query));
-      row.hidden = !matches || (status !== 'all' && !account[status]);
+      const party = parties[Number(row.dataset.ledgerRow)];
+      const matches = contactKey(party.name).includes(query) || party.entries.some(entry => contactKey(entry.reference).includes(query));
+      row.hidden = !matches || (status !== 'all' && !party[status]);
       if (!row.hidden) count++;
     }
     document.getElementById('ledger-count').textContent = String(count);
-    if (accounts.length) {
+    if (parties.length) {
       document.getElementById('party-ledger-table').hidden = count === 0;
       document.getElementById('ledger-no-match').hidden = count > 0;
     }
@@ -121,44 +164,197 @@ function showLedger(data) {
   filter();
 }
 
-async function openPartyLedger(data, account) {
+async function openPartyLedger(data, party) {
   const page = document.getElementById('main-content');
-  const contact = matchingContact(await ownerContacts().catch(() => []), account.name);
+  const contact = matchingContact(await ownerContacts().catch(() => []), party.name);
   if (!page.isConnected) return;
-  const stats = `<dl class="ledger-balances">
-    <div><dt>To collect</dt><dd>${money(account.incoming)}</dd></div>
-    <div><dt>To pay</dt><dd>${money(account.outgoing)}</dd></div>
-  </dl>`;
-  moneyDialog(account.name + ' · Ledger', `${stats}
+  const current = data.financial.as_of === data.today;
+  moneyDialog(party.name + ' · Ledger', `<p class="money-dialog-intro">As of ${safe(businessDay(data.financial.as_of, 'long'))}</p>
+    <dl class="ledger-balances">
+      <div><dt>To collect</dt><dd>${money(party.incoming)}</dd></div>
+      <div><dt>To pay</dt><dd>${money(party.outgoing)}</dd></div>
+    </dl>
     <div class="money-account-actions">
-      ${contact?.phone ? '<button id="ledger-whatsapp" class="secondary" type="button">WhatsApp</button>' : ''}
+      <button id="ledger-party-export" class="secondary" type="button">Export statement</button>
+      ${contact?.phone && current ? '<button id="ledger-whatsapp" class="secondary" type="button">WhatsApp</button>' : ''}
       <button id="ledger-contact" class="secondary" type="button">${contact ? 'Edit contact' : 'Save contact'}</button>
-      ${account.customer ? '<button id="ledger-fuel-credit" class="secondary" type="button">Fuel credit account</button>' : ''}
+      ${party.customer && current ? '<button id="ledger-fuel-credit" class="secondary" type="button">Fuel credit account</button>' : ''}
     </div>
     <h3>Transactions</h3>
-    ${account.entries.length ? `<ul class="ledger-entries">${account.entries.map((row, index) => `<li>
-      <div><strong>${safe(row.type)}</strong>${row.void ? moneyBadge('Voided') : ''}
-        <small>${safe(businessDay(row.date, 'medium'))}${row.reference ? ' · ' + safe(row.reference) : ''}</small>
-        ${row.note ? `<small>${safe(row.note)}</small>` : ''}
-        ${row.receivable ? `<button id="ledger-due-${index}" class="text-button" type="button">Open receivable</button>` : ''}
-        ${row.billId ? `<button id="ledger-bill-${index}" class="text-button" type="button">Open bill</button>` : ''}
+    <ul class="ledger-entries">${party.entries.map((row, index) => `<li>
+      <div><strong>${safe(row.type)}</strong>${row.reversal ? moneyBadge('Reversal', 'warning') : ''}
+        <small>${safe(businessDay(row.date, 'medium'))} · ${safe(row.reference)}</small>
+        ${row.reason || row.note ? `<small>${safe(row.reason || row.note)}</small>` : ''}
+        ${row.receivable && current && !row.reversal ? `<button id="ledger-due-${index}" class="text-button" type="button">Open receivable</button>` : ''}
+        ${row.billId && current && !row.reversal ? `<button id="ledger-bill-${index}" class="text-button" type="button">Open bill</button>` : ''}
       </div>
       <div><strong>${row.amount < 0 ? '−' : '+'}${money(Math.abs(row.amount))}</strong>
         <small>${money(row.balance)} ${row.side === 'incoming' ? 'to collect' : 'to pay'}</small></div>
-    </li>`).join('')}</ul>` : '<p class="money-form-hint">No transactions recorded.</p>'}`, true);
-  listen('ledger-contact', () => openContactForm(contact, account.name, () => openBusiness('ledger')));
-  if (account.customer) listen('ledger-fuel-credit', () => openCustomerAccount(data, account.customer));
-  if (contact?.phone) listen('ledger-whatsapp', () => {
-    const message = account.incoming > 0
-      ? `Hello ${account.name}, this is a reminder from ${session.station}. Your outstanding balance is ${money(account.incoming)}. Please share the payment reference once paid.`
+    </li>`).join('')}</ul>`, true);
+  listen('ledger-party-export', () => ledgerCSV('party-statement', data.financial.as_of, [
+    ['Party', party.name], ['As of', data.financial.as_of], ['To collect (INR)', party.incoming / 100], ['To pay (INR)', party.outgoing / 100],
+    ['Date', 'Reference', 'Entry', 'Direction', 'Amount (INR)', 'Running balance (INR)', 'Notes'],
+    ...party.entries.slice().reverse().map(row => [row.date, row.reference, row.type, row.side,
+      row.amount / 100, row.balance / 100, row.reason || row.note || ''])
+  ]));
+  listen('ledger-contact', () => openContactForm(contact, party.name, () => openBusiness('ledger')));
+  if (party.customer && current) listen('ledger-fuel-credit', () => openCustomerAccount(data, party.customer));
+  if (contact?.phone && current) listen('ledger-whatsapp', () => {
+    const message = party.incoming > 0
+      ? `Hello ${party.name}, this is a reminder from ${session.station}. Your outstanding balance is ${money(party.incoming)}. Please share the payment reference once paid.`
       : '';
     openWhatsAppComposer(message, 'Message ' + contact.name, contact.name, contact.phone);
   });
-  for (const [index, row] of account.entries.entries()) {
-    if (row.receivable) listen('ledger-due-' + index, () => openMarketDetail(data, row.receivable));
-    if (row.billId) listen('ledger-bill-' + index, () => openOutgoings('payables', () => {
-      const bill = outgoingData.bills.find(item => item.id === row.billId);
-      if (bill) outgoingDetail('bill', bill);
-    }));
+  if (current) {
+    for (const [index, row] of party.entries.entries()) {
+      if (row.reversal) continue;
+      if (row.receivable) listen('ledger-due-' + index, () => openMarketDetail(data, row.receivable));
+      if (row.billId) listen('ledger-bill-' + index, () => openOutgoings('payables', () => {
+        const bill = outgoingData.bills.find(item => item.id === row.billId);
+        if (bill) outgoingDetail('bill', bill);
+      }));
+    }
   }
+}
+
+function journalPanel(data) {
+  const options = [['', 'All accounts'], ...data.financial.accounts.map(row => [row.code, row.name])];
+  return `<div class="money-toolbar"><h2>Journal</h2><div class="money-tools">
+    <label><span class="sr-only">Journal account</span><select id="journal-account">${moneyOptions(options, ledgerView.account)}</select></label>
+    <button id="journal-export" class="secondary" type="button">Export journal</button>
+  </div></div><div id="journal-results"></div>`;
+}
+
+function bindJournal(data) {
+  const {financial} = data;
+  const accounts = new Map(financial.accounts.map(row => [row.code, row.name]));
+  const visibleEntries = () => financial.entries.filter(entry =>
+    !ledgerView.account || entry.lines.some(line => line.account === ledgerView.account));
+  const render = () => {
+    let balance = 0;
+    const entries = visibleEntries().map(entry => {
+      balance += entry.lines.reduce((sum, line) => line.account === ledgerView.account ? sum + line.amount : sum, 0);
+      return {entry, balance};
+    }).reverse();
+    document.getElementById('journal-results').innerHTML = entries.length ? `<ul class="journal-list">${entries.map(({entry, balance}, i) => `<li>
+      <button id="journal-entry-${i}" class="money-source-link market-detail" type="button"><strong>${safe(entry.description)}</strong>
+        <small>${safe(businessDay(entry.date, 'medium'))} · ${safe(entry.reference)}</small></button>
+      <div class="journal-amount"><strong>${money(entry.lines.reduce((sum, line) => sum + Math.max(0, line.amount), 0))}</strong>
+        ${ledgerView.account ? `<small>${money(Math.abs(balance))} ${balance < 0 ? 'Cr' : 'Dr'} balance</small>` : ''}</div>
+    </li>`).join('')}</ul>` : moneyEmpty('No journal entries', 'Choose another account or statement date.');
+    entries.forEach(({entry}, i) => listen('journal-entry-' + i, () => openJournalEntry(data, entry, accounts)));
+  };
+  listen('journal-account', event => { ledgerView.account = event.target.value; render(); }, 'change');
+  listen('journal-export', () => ledgerCSV('journal', financial.as_of, [
+    ['As of', financial.as_of],
+    ['Date', 'Recorded at', 'Reference', 'Entry', 'Account code', 'Account', 'Party', 'Debit (INR)', 'Credit (INR)', 'Reason'],
+    ...visibleEntries().flatMap(entry => entry.lines.map(line => [entry.date, entry.recorded_at, entry.reference,
+      entry.description, line.account, accounts.get(line.account), line.party || '', Math.max(0, line.amount) / 100,
+      Math.max(0, -line.amount) / 100, entry.reason || '']))
+  ]));
+  render();
+}
+
+function openJournalEntry(data, entry, accounts) {
+  const canReverse = entry.source === 'journal' && !entry.reversal && data.financial.as_of === data.today &&
+    !data.financial.entries.some(row => row.source === 'journal' && row.reversal_of === entry.source_id);
+  moneyDialog(entry.description, `<p class="money-dialog-intro">${safe(businessDay(entry.date, 'medium'))} · ${safe(entry.reference)}
+    ${entry.actor ? ' · ' + safe(entry.actor) : ''}</p>
+    ${entry.reason ? `<p class="money-dialog-intro">${safe(entry.reason)}</p>` : ''}
+    <div class="table-scroll"><table class="money-table">
+      <thead><tr><th>Account</th><th class="numeric">Debit</th><th class="numeric">Credit</th></tr></thead>
+      <tbody>${entry.lines.map(line => `<tr><th scope="row">${safe(accounts.get(line.account))}${line.party ? `<small>${safe(line.party)}</small>` : ''}</th>
+        <td class="numeric">${line.amount > 0 ? money(line.amount) : '—'}</td>
+        <td class="numeric">${line.amount < 0 ? money(-line.amount) : '—'}</td></tr>`).join('')}</tbody>
+    </table></div>
+    ${canReverse ? '<button id="manual-journal-reverse" class="secondary" type="button">Reverse entry</button>' : ''}`, true);
+  if (canReverse) listen('manual-journal-reverse', () => {
+    moneyDialog('Reverse journal entry', `<form id="journal-reversal-form" class="money-form">
+      <p class="money-form-hint">An opposite entry will be posted today. The original will remain in the journal.</p>
+      ${businessNote('Reason', 'reason', true, 350)}${errorbox}<button class="primary">Post reversal</button>
+    </form>`);
+    bindForm('journal-reversal-form', async form => {
+      await api('/ledger/journals/reverse', {id: entry.source_id, ...fields(form)});
+      await openBusiness('ledger');
+      showBusinessNotice('Reversal posted.');
+    });
+  });
+}
+
+function trialBalancePanel(financial) {
+  const rows = financial.trial.filter(row => row.debit || row.credit);
+  return `<div class="money-toolbar"><h2>Trial balance</h2><div class="money-tools">
+    ${moneyBadge(financial.total_debit === financial.total_credit ? 'Balanced' : 'Out of balance', financial.total_debit === financial.total_credit ? 'positive' : 'warning')}
+    <button id="trial-export" class="secondary" type="button">Export trial balance</button>
+  </div></div>
+  <div class="table-scroll money-table-wrap" id="trial-balance-table"><table class="money-table">
+    <thead><tr><th scope="col">Account</th><th scope="col" class="numeric">Debit</th><th scope="col" class="numeric">Credit</th></tr></thead>
+    <tbody>${rows.map(row => `<tr><th scope="row">${safe(row.name)}<small>${safe(row.code)} · ${safe(row.category)}</small></th>
+      <td class="numeric">${row.debit ? money(row.debit) : '—'}</td>
+      <td class="numeric">${row.credit ? money(row.credit) : '—'}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><th scope="row">Totals</th><td class="numeric"><strong>${money(financial.total_debit)}</strong></td>
+      <td class="numeric"><strong>${money(financial.total_credit)}</strong></td></tr></tfoot>
+  </table></div>
+  <p class="ledger-account-note">Review balances in clearing accounts. Use purchase costs to post fuel inventory value and cost of sales.</p>`;
+}
+
+function openManualJournal(data) {
+  const options = moneyOptions(data.financial.accounts.filter(row => row.manual).map(row => [row.code, row.code + ' · ' + row.name]));
+  const line = () => `<fieldset class="journal-line"><legend>Journal line</legend>
+    <label>Account<select data-journal-account required><option value="">Choose account</option>${options}</select></label>
+    <div class="money-form-grid">${numberField('Debit (₹)', 'debit')}${numberField('Credit (₹)', 'credit')}</div>
+    <button type="button" class="text-button" data-remove-journal-line>Remove line</button>
+  </fieldset>`;
+  const dialog = moneyDialog('New journal entry', `<form id="manual-journal-form" class="money-form">
+    ${businessDate('Posting date', 'date', data.today)}${businessText('Reference', 'reference')}
+    ${businessNote('Description', 'description', true)}
+    <p class="money-form-hint">Use this for opening balances, adjustments and inventory valuation. Sales, bills and payments from station workflows post automatically.</p>
+    <div id="journal-lines">${line()}${line()}</div>
+    <button id="add-journal-line" class="secondary" type="button">Add line</button>
+    ${errorbox}<button class="primary">Post journal entry</button>
+  </form>`, true);
+  const container = dialog.querySelector('#journal-lines');
+  const add = dialog.querySelector('#add-journal-line');
+  const refreshLines = () => {
+    for (const button of container.querySelectorAll('[data-remove-journal-line]')) button.disabled = container.children.length <= 2;
+    add.disabled = container.children.length >= 20;
+  };
+  listen('add-journal-line', () => {
+    container.insertAdjacentHTML('beforeend', line());
+    refreshLines();
+    container.lastElementChild.querySelector('select').focus();
+  });
+  container.addEventListener('click', event => {
+    if (!event.target.matches('[data-remove-journal-line]')) return;
+    event.target.closest('fieldset').remove();
+    refreshLines();
+    add.focus();
+  });
+  refreshLines();
+  bindForm('manual-journal-form', async form => {
+    const lines = [...container.children].map(row => ({account: row.querySelector('select').value,
+      debit: row.querySelector('[name=debit]').value, credit: row.querySelector('[name=credit]').value}));
+    await api('/ledger/journals', {date: form.elements.date.value, reference: form.elements.reference.value,
+      description: form.elements.description.value, lines});
+    ledgerView.tab = 'journal';
+    ledgerView.date = '';
+    await openBusiness('ledger');
+    showBusinessNotice('Journal entry posted.');
+  });
+}
+
+function ledgerCSV(name, date, rows) {
+  const csv = '\ufeff' + rows.map(row => row.map(cell => {
+    const text = String(cell ?? '');
+    const value = typeof cell === 'string' && /^[\s\u0000-\u001f]*[=+@-]/.test(text) ? "'" + text : text;
+    return '"' + value.replace(/"/g, '""') + '"';
+  }).join(',')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'}));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name + '-' + date + '.csv';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }

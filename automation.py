@@ -418,9 +418,7 @@ class Automation:
                 if target['method']=='cash' and data['fees']:self.fail('Cash deposits cannot include fees.')
                 if data['amount']+data['fees']>target['remaining']:self.fail('Amount and fees exceed the pending settlement.',409)
                 if self.db.execute('SELECT 1 FROM bank_records WHERE station_id=? AND lower(reference)=lower(?)',(self.sid,data['reference'])).fetchone():self.fail('This bank reference is already recorded. Ignore this imported duplicate.',409)
-                if target['source'].startswith('shift:'):
-                    original=self.db.execute('SELECT business_date FROM shifts WHERE id=? AND station_id=?',(int(target['source'].split(':')[1]),self.sid)).fetchone()
-                    if original and data['date']<original['business_date']:self.fail('The bank date is before the selected shift.')
+                if data['date']<target['available_on']:self.fail('The bank date is before the selected shift or cash receipt.')
                 self.db.execute('INSERT INTO bank_records(station_id,source,method,amount,fees,bank_date,reference,note,user_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
                      (self.sid,target['source'],target['method'],data['amount'],data['fees'],data['date'],data['reference'],'Imported bank evidence: '+data['description'][:400],self.user['id'],self.now()))
                 matched_type,matched_id='bank',str(self.db.execute('SELECT id FROM bank_records WHERE station_id=? AND reference=?',(self.sid,data['reference'])).fetchone()['id'])

@@ -30,7 +30,8 @@ const businessDate = (label, name, value, required = true) => `<label>${label}<i
 
 function openBusiness(view = 'operations', afterRender) {
   const render = {ledger: showLedger, money: showMoney, banking: data => showMoney(data, true), exceptions: showExceptions, operations: showOperations}[view];
-  return loadOwnerView('/business/' + view, data => {
+  const query = view === 'ledger' && ledgerView.date ? '?as_of=' + encodeURIComponent(ledgerView.date) : '';
+  return loadOwnerView('/business/' + view + query, data => {
     render(data);
     afterRender?.(data);
   });
