@@ -45,7 +45,7 @@ function showMoney(data, banking = false) {
   ];
   const actions = banking
     ? '<button id="bank-imports" class="secondary" type="button">Bank statement imports</button>'
-    : `<button id="money-record-credit" class="secondary" type="button">+ Record fuel credit</button>
+    : `<button id="money-record-credit" class="secondary" type="button">${data.active ? '+ Record fuel credit' : 'Fuel credit options'}</button>
        <button id="money-add-receivable" class="primary" type="button">+ Record money owed</button>`;
   const body = `    <div class="money-stats ledger-stats">${stats.map(([label,value,caption,flag,tone])=>`<section class="money-stat ${tone}" aria-label="${label}"><div><span>${label}</span>${flag ? moneyBadge(flag,'warning') : ''}</div><strong>${money(value)}</strong><small>${caption}</small></section>`).join('')}</div>
     ${!banking && data.unallocated_credit ? `<div class="money-allocation-alert"><div>${navigationIcon('exceptions')}<span><strong>${money(data.unallocated_credit)} needs a customer</strong><span>Assign credit sales before recording a payment.</span></span></div><button id="money-allocate" type="button" class="text-button">Assign credit ${icon('arrow')}</button></div>` : ''}
@@ -166,9 +166,19 @@ function pendingCreditSummary(data) {
 
 function openShiftCredit(data, item = null, name = '') {
   if (!data.active) {
-    moneyDialog('Record customer credit', `<p class="money-dialog-intro">Record credit while a shift is open. Ask the manager to open a shift, or open a submitted shift’s report if you need to correct its figures.</p>
-      ${data.unallocated_credit ? '<button id="credit-assign-existing" class="secondary" type="button">Assign existing credit</button>' : ''}`);
-    if (data.unallocated_credit) listen('credit-assign-existing', () => openAllocationForm(data));
+    const canAssign = data.unallocated_shifts.length > 0;
+    moneyDialog('Fuel credit', `<p class="money-dialog-intro">Fuel credit belongs to the shift when the sale happened. Choose the option that fits this balance.</p>
+      <div class="money-help-content">
+        ${canAssign ? `<section><h3>Credit already on a shift</h3><p>Give a customer name to credit that was already recorded.</p>
+          <button id="credit-assign-existing" class="secondary" type="button">Assign existing credit</button></section>` : ''}
+        <section><h3>Sale from a submitted shift</h3><p>Open the report for the sale date and select the shift to correct its figures.</p>
+          <button id="credit-open-report" class="secondary" type="button">Open daily report</button></section>
+        <section><h3>Balance carried into the app</h3><p>Record money the customer already owed when you started using the app.</p>
+          <button id="credit-opening-balance" class="secondary" type="button">Record opening balance</button></section>
+      </div>`);
+    if (canAssign) listen('credit-assign-existing', () => openAllocationForm(data, name));
+    listen('credit-open-report', openDailyReport);
+    listen('credit-opening-balance', () => openMarketForm(data, name, 'opening'));
     return;
   }
   const shiftId = data.active.id;
@@ -221,8 +231,8 @@ function openBankForm(data,item) {
     ${item.records.length ? `<h3>Recorded receipts</h3><div class="money-receipts">${item.records.map(row=>`<div><span>${safe(row.reference)}<small>${safe(row.bank_date)}</small></span><strong>${money(row.amount)}</strong></div>`).join('')}</div>` : ''}`);
   if(item.remaining>0)bindMoneyForm('money-bank-form','/bank-records',{source:item.source,method:item.method},item.method==='cash' ? 'Cash deposit recorded.' : 'Bank settlement recorded.');
 }
-function openAllocationForm(data) {
-  moneyDialog('Assign credit to a customer',`<p class="money-dialog-intro">These credit sales need a customer name.</p><form id="money-allocation-form" class="money-form"><label>Shift<select name="shift_id" required>${data.unallocated_shifts.map(item=>`<option value="${item.shift_id}">Shift #${item.shift_id} · ${money(item.remaining)} to assign</option>`).join('')}</select></label>${contactNameField('Customer / account name', 'name', '', {knownNames: data.customers.map(item => item.name)})}${numberField('Credit amount to assign (₹)','amount',{required:true,min:0.01})}${businessText('Unique allocation reference','reference')}${errorbox}<button class="primary">Assign credit</button></form>`);
+function openAllocationForm(data, name = '') {
+  moneyDialog('Assign credit to a customer',`<p class="money-dialog-intro">These credit sales need a customer name.</p><form id="money-allocation-form" class="money-form"><label>Shift<select name="shift_id" required>${data.unallocated_shifts.map(item=>`<option value="${item.shift_id}">Shift #${item.shift_id} · ${money(item.remaining)} to assign</option>`).join('')}</select></label>${contactNameField('Customer / account name', 'name', name, {knownNames: data.customers.map(item => item.name)})}${numberField('Credit amount to assign (₹)','amount',{required:true,min:0.01})}${businessText('Unique allocation reference','reference')}${errorbox}<button class="primary">Assign credit</button></form>`);
   const form=document.getElementById('money-allocation-form');const update=()=>{form.elements.amount.max=data.unallocated_shifts.find(item=>item.shift_id===Number(form.elements.shift_id.value)).remaining/100;};form.elements.shift_id.addEventListener('change',update);update();
   bindForm('money-allocation-form',async form=>{const values=fields(form);await api('/credit-allocations',{...values,shift_id:Number(values.shift_id)});await openBusiness('money');showBusinessNotice('Credit assigned to customer.');});
 }
@@ -236,7 +246,7 @@ function openMoneyEntry(item) {
 function openMoneyHelp(banking) {
   const content = banking
     ? '<section><h3>Settlements and deposits</h3><p>Match UPI and card totals to confirmed bank receipts and enter any fees separately. Record cash deposits after the cash reaches the bank.</p></section>'
-    : '<section><h3>Fuel credit</h3><p>Record credit during an open shift. It becomes due when the manager submits the shift.</p></section><section><h3>Other dues</h3><p>Add refunds, loans, reimbursements and other amounts owed. Open a receivable to record a full or partial payment against it.</p></section>';
+    : '<section><h3>Fuel credit</h3><p>Credit from a fuel sale posts when the shift is submitted. Open the sale’s shift report if you need to correct figures after submission.</p></section><section><h3>Other dues</h3><p>Add refunds, loans, reimbursements and other amounts owed. Open a receivable to record a full or partial payment against it.</p></section>';
   moneyDialog(banking ? 'How Banking works' : 'How collections work', `<div class="money-help-content">${content}<section><h3>Correct an entry</h3><p>Open the entry in Activity and void it with a reason. The original remains in history.</p></section></div>`);
 }
 
@@ -309,11 +319,11 @@ function filterMarketRows() {
   }
 }
 
-function openMarketForm(data, name = '') {
+function openMarketForm(data, name = '', kind = '') {
   const view = document.getElementById('main-content').dataset.view;
   moneyDialog('Record money owed', `<form id="market-receivable-form" class="money-form">
     ${contactNameField('Owed by (person or company)', 'party', name, {knownNames: data.market_receivables.map(item => item.party)})}
-    <div><label for="market-kind">Receivable type</label><select id="market-kind" name="kind" required><option value="">Choose a type</option>${moneyOptions(Object.entries(marketKinds))}</select></div>
+    <div><label for="market-kind">Receivable type</label><select id="market-kind" name="kind" required><option value="">Choose a type</option>${moneyOptions(Object.entries(marketKinds), kind)}</select></div>
     ${numberField('Amount owed (₹)', 'amount', {min: 0.01, required: true})}
     <div class="money-form-grid">${businessDate('Date owed', 'recorded_on', data.today)}${businessDate('Due date (optional)', 'due_date', '', false)}</div>
     ${businessText('Reference', 'reference')}

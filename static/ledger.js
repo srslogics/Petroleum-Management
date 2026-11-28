@@ -272,7 +272,7 @@ function openPartyLedger(data, party) {
     <div class="money-account-actions">
       ${contact || !party.staff ? `<button id="party-add-receivable" type="button" class="secondary">Record money owed</button>
       <button id="party-add-bill" type="button" class="secondary">Add bill</button>
-      ${data.active ? '<button id="party-add-credit" type="button" class="secondary">Record fuel credit</button>' : ''}` : ''}
+      <button id="party-add-credit" type="button" class="secondary">${data.active ? 'Record fuel credit' : 'Fuel credit options'}</button>` : ''}
       ${party.staff?.active ? '<button id="party-add-salary" type="button" class="secondary">Add salary</button><button id="party-add-advance" type="button" class="secondary">Give advance</button>' : ''}
       ${party.advances > 0 ? '<button id="party-return-advance" type="button" class="secondary">Record advance return</button>' : ''}
     </div>
@@ -325,7 +325,7 @@ function openPartyLedger(data, party) {
   if (contact || !party.staff) {
     listen('party-add-receivable', () => openMarketForm(data, party.name));
     listen('party-add-bill', () => outgoingBillForm(data, party.name));
-    if (data.active) listen('party-add-credit', () => openShiftCredit(data, null, party.name));
+    listen('party-add-credit', () => openShiftCredit(data, null, party.name));
   }
   const outgoingModel = {...data, entries: [...data.bill_payments, ...data.staff_entries]};
   if (party.staff?.active) {
