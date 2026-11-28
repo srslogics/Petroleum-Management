@@ -213,7 +213,13 @@
   .ledger-balances > div { padding: 10px; }
 }
 
-.ledger-date-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin: 0 0 20px; }
+.ledger-statement-date { margin: 0 0 16px; }
+.ledger-statement-date > summary { width: fit-content; padding: 9px 0; cursor: pointer; color: var(--accent); }
+.ledger-date-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-top: 9px; }
+.ledger-book-tabs { flex-wrap: wrap; margin-bottom: 12px; }
+.ledger-stats .text-button { justify-content: flex-start; min-height: 44px; padding-inline: 0; gap: 8px; }
+.ledger-stats .text-button .icon { height: 16px; width: 16px; }
+.outgoing-summary { margin: 10px 0 0; }
 .ledger-date-form .form-error:empty { display: none; }
 .ledger-date-form .form-error { flex-basis: 100%; }
 .ledger-account-note { color: var(--muted); padding: 14px 22px; border-top: 1px solid var(--line); }

@@ -1,41 +1,60 @@
 "use strict";
 
 const ledgerView = {tab: 'parties', date: '', search: '', status: 'all', account: ''};
-const ledgerTabs = [['parties', 'Balances'], ['collect', 'To collect'], ['pay', 'To pay'], ['journal', 'Journal'], ['trial', 'Trial balance']];
+const ledgerTabs = [['parties', 'Balances'], ['collect', 'To collect'], ['pay', 'To pay'], ['banking', 'Banking'], ['books', 'Books']];
+const ledgerBookTabs = [['journal', 'Journal'], ['trial', 'Trial balance']];
+const ledgerDescription = {
+  parties: 'See what the station needs to collect and pay.',
+  collect: 'Record fuel credit, other amounts owed and payments received.',
+  pay: 'Manage bills and staff pay, and record payments already made.',
+  banking: 'Confirm cash deposits and UPI or card receipts from the bank.',
+  books: 'Review the journal and trial balance for the station.',
+};
 
-function ledgerWorkspace(active, description, actions, body) {
-  const tabs = ledgerTabs.map(([key, title]) =>
-    `<button id="ledger-tab-${key}" type="button" role="tab" aria-selected="${key === active}"
-      aria-controls="ledger-panel" tabindex="${key === active ? 0 : -1}">${title}</button>`).join('');
-  return `<div class="money-heading"><div>${heading('', 'Ledger', description)}</div>
-    <div class="money-heading-actions">${actions}</div></div>
-    <div class="money-tabs ledger-workspace-tabs" role="tablist" aria-label="Ledger views">${tabs}</div>
+function ledgerTabButtons(tabs, active, prefix, panel) {
+  return tabs.map(([key, title]) => `
+    <button id="${prefix + key}" type="button" role="tab" aria-selected="${key === active}"
+      aria-controls="${panel}" tabindex="${key === active ? 0 : -1}">${title}</button>`).join('');
+}
+
+function ledgerWorkspace(active, actions, body) {
+  return `<div class="money-heading">${heading('', 'Ledger', ledgerDescription[active])}
+    ${actions ? `<div class="money-heading-actions">${actions}</div>` : ''}
+    </div>
+    <div class="money-tabs ledger-workspace-tabs" role="tablist" aria-label="Ledger views">
+      ${ledgerTabButtons(ledgerTabs, active, 'ledger-tab-', 'ledger-panel')}
+    </div>
     <div id="ledger-panel" role="tabpanel" aria-labelledby="ledger-tab-${active}">${body}</div>`;
 }
 
-function bindLedgerNavigation(active, data) {
-  async function select(tab) {
-    if (tab === active) return;
-    if (tab === 'collect') await openBusiness('money');
-    else if (tab === 'pay') await openOutgoings('payables');
-    else {
-      ledgerView.tab = tab;
-      if (data) showLedger(data);
-      else await openBusiness('ledger');
-    }
-    document.getElementById('ledger-tab-' + tab)?.focus({preventScroll: true});
-  }
-  for (const [index, [key]] of ledgerTabs.entries()) {
-    const id = 'ledger-tab-' + key;
-    listen(id, () => select(key));
+function bindLedgerTabs(tabs, prefix, active, select) {
+  const activate = async key => {
+    if (key !== active) await select(key);
+    document.getElementById(prefix + key)?.focus({preventScroll: true});
+  };
+  for (const [index, [key]] of tabs.entries()) {
+    const id = prefix + key;
+    listen(id, () => activate(key));
     listen(id, event => {
-      const target = {Home: 0, End: ledgerTabs.length - 1, ArrowRight: (index + 1) % ledgerTabs.length,
-        ArrowLeft: (index + ledgerTabs.length - 1) % ledgerTabs.length}[event.key];
+      const target = {Home: 0, End: tabs.length - 1, ArrowRight: (index + 1) % tabs.length,
+        ArrowLeft: (index + tabs.length - 1) % tabs.length}[event.key];
       if (target === undefined) return;
       event.preventDefault();
-      return select(ledgerTabs[target][0]);
+      return activate(tabs[target][0]);
     }, 'keydown');
   }
+}
+
+function openLedgerSection(tab) {
+  if (tab === 'collect') return openBusiness('money');
+  if (tab === 'pay') return openOutgoings();
+  if (tab === 'banking') return openBusiness('banking');
+  ledgerView.tab = tab === 'books' ? 'journal' : 'parties';
+  return openBusiness('ledger');
+}
+
+function bindLedgerNavigation(active) {
+  bindLedgerTabs(ledgerTabs, 'ledger-tab-', active, openLedgerSection);
 }
 
 function buildPartyLedger(data) {
@@ -88,50 +107,83 @@ function buildPartyLedger(data) {
   return [...parties.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function showLedger(data) {
-  const {financial, today} = data;
-  const parties = buildPartyLedger(data);
-  const collect = parties.reduce((sum, party) => sum + party.incoming, financial.unassigned);
-  const pay = parties.reduce((sum, party) => sum + party.outgoing, 0);
-  const actions = {
-    parties: `<button id="ledger-new-bill" class="secondary" type="button">+ Add bill</button>
-      <button id="ledger-new-receivable" class="primary" type="button">+ Record money owed</button>`,
-    journal: '<button id="ledger-new-journal" class="primary" type="button">+ Journal entry</button>',
-    trial: '',
-  }[ledgerView.tab];
-  const body = `    <form id="ledger-date-form" class="ledger-date-form" aria-label="Statement date">
+function ledgerStatementDate(financial, today) {
+  const current = financial.as_of === today;
+  return `<details class="ledger-statement-date"${current ? '' : ' open'}>
+    <summary>${current ? 'Change statement date' : `Statement as of ${safe(businessDay(financial.as_of, 'medium'))}`}</summary>
+    <form id="ledger-date-form" class="ledger-date-form" aria-label="Statement date">
       <label>As of date<input name="date" type="date" value="${safe(financial.as_of)}" max="${safe(today)}" required></label>
       <button class="secondary">View statement</button>
       ${errorbox}
     </form>
-    <div class="money-stats ledger-stats">
-      <section class="money-stat dues" aria-label="Total to collect"><div>To collect</div><strong>${money(collect)}</strong></section>
-      <section class="money-stat" aria-label="Total to pay"><div>To pay</div><strong>${money(pay)}</strong></section>
-    </div>
+  </details>`;
+}
+
+function ledgerTotals(financial) {
+  const accounts = new Map(financial.trial.map(account => [account.code, account]));
+  const receivable = code => accounts.get(code).debit - accounts.get(code).credit;
+  const payable = code => accounts.get(code).credit - accounts.get(code).debit;
+  const fuelCredit = receivable('1100') + receivable('1120');
+  const other = receivable('1110');
+  const bills = payable('2000');
+  const salaries = payable('2010');
+  return `<div class="money-stats ledger-stats">
+    <section class="money-stat dues" aria-label="Total to collect">
+      <div>To collect</div><strong>${money(fuelCredit + other)}</strong>
+      <small>Fuel credit ${money(fuelCredit)} · Other dues ${money(other)}</small>
+      <button id="ledger-open-collect" class="text-button" type="button">Open collections ${icon('arrow')}</button>
+    </section>
+    <section class="money-stat" aria-label="Total to pay">
+      <div>To pay</div><strong>${money(bills + salaries)}</strong>
+      <small>Bills ${money(bills)} · Salaries ${money(salaries)}</small>
+      <button id="ledger-open-pay" class="text-button" type="button">Open payments ${icon('arrow')}</button>
+    </section>
+  </div>`;
+}
+
+function showLedger(data) {
+  const {financial, today} = data;
+  const tab = ledgerView.tab;
+  const balances = tab === 'parties';
+  const parties = balances ? buildPartyLedger(data) : [];
+  const statementDate = ledgerStatementDate(financial, today);
+  const actions = tab === 'journal' && financial.as_of === today
+    ? '<button id="ledger-new-journal" class="primary" type="button">+ Journal entry</button>' : '';
+  const historical = financial.as_of !== today;
+  const body = balances ? `${historical ? statementDate : ''}${ledgerTotals(financial)}${historical ? '' : statementDate}
     ${financial.unassigned ? `<div class="money-allocation-alert">
       <div>${navigationIcon('exceptions')}<span><strong>${money(financial.unassigned)} in unassigned fuel credit</strong></span></div>
       ${financial.as_of === today ? '<button id="ledger-assign-credit" class="text-button" type="button">Assign customer</button>' : ''}
     </div>` : ''}
-    <section class="money-workspace" aria-label="Financial ledger">
-      ${ledgerView.tab === 'parties' ? partyList(parties) : ledgerView.tab === 'journal' ? journalPanel(data) : trialBalancePanel(financial)}
-    </section>`;
-  shell(ledgerWorkspace(ledgerView.tab, 'See who owes you and who you need to pay.', actions, body), 'ledger');
+    <section class="money-workspace" aria-label="Customer and supplier balances">${partyList(parties)}</section>`
+    : `<div class="money-tabs ledger-book-tabs" role="tablist" aria-label="Books">
+        ${ledgerTabButtons(ledgerBookTabs, tab, 'ledger-book-', 'ledger-book-panel')}
+      </div>
+      ${statementDate}
+      <section class="money-workspace" id="ledger-book-panel" role="tabpanel" aria-labelledby="ledger-book-${tab}">
+        ${tab === 'journal' ? journalPanel(data) : trialBalancePanel(financial)}
+      </section>`;
+  shell(ledgerWorkspace(balances ? 'parties' : 'books', actions, body), 'ledger');
   bindForm('ledger-date-form', async form => {
     const prior = ledgerView.date;
     ledgerView.date = form.elements.date.value === today ? '' : form.elements.date.value;
     try { await openBusiness('ledger'); }
     catch (error) { ledgerView.date = prior; throw error; }
   });
-  if (ledgerView.tab === 'parties') {
-    listen('ledger-new-bill', () => outgoingBillForm(data));
-    listen('ledger-new-receivable', () => openMarketForm(data));
-  } else if (ledgerView.tab === 'journal') {
-    listen('ledger-new-journal', () => openManualJournal(data));
+  if (actions) listen('ledger-new-journal', () => openManualJournal(data));
+  bindLedgerNavigation(balances ? 'parties' : 'books');
+  if (balances) {
+    if (document.getElementById('ledger-assign-credit')) listen('ledger-assign-credit', () => openBusiness('money', openAllocationForm));
+    listen('ledger-open-collect', () => openLedgerSection('collect'));
+    listen('ledger-open-pay', () => openLedgerSection('pay'));
+    bindPartyList(data, parties);
+    return;
   }
-  if (document.getElementById('ledger-assign-credit')) listen('ledger-assign-credit', () => openBusiness('money', openAllocationForm));
-  bindLedgerNavigation(ledgerView.tab, data);
-  if (ledgerView.tab === 'parties') bindPartyList(data, parties);
-  else if (ledgerView.tab === 'journal') bindJournal(data);
+  bindLedgerTabs(ledgerBookTabs, 'ledger-book-', tab, next => {
+    ledgerView.tab = next;
+    showLedger(data);
+  });
+  if (tab === 'journal') bindJournal(data);
   else listen('trial-export', () => ledgerCSV('trial-balance', financial.as_of, [
     ['As of', financial.as_of], ['Code', 'Account', 'Category', 'Debit (INR)', 'Credit (INR)'],
     ...financial.trial.map(row => [row.code, row.name, row.category, row.debit / 100, row.credit / 100]),
@@ -140,7 +192,7 @@ function showLedger(data) {
 }
 
 function partyList(parties) {
-  return `<div class="money-toolbar"><h2>People and businesses <span id="ledger-count"></span></h2>
+  return `<div class="money-toolbar"><h2>Customer and supplier balances <span id="ledger-count"></span></h2>
       <div class="money-tools">${moneySearch('ledger-search', 'Search names or references', ledgerView.search)}
         <label><span class="sr-only">Ledger status</span><select id="ledger-filter">${moneyOptions([
           ['all', 'All parties'], ['incoming', 'To collect'], ['outgoing', 'To pay'], ['overdue', 'Overdue']

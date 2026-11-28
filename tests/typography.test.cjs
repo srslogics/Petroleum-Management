@@ -135,17 +135,17 @@ test('typography stays consistent across roles, reports, phone layouts and offli
   await page.getByRole('heading',{name:'Station overview'}).waitFor();
   await audit('owner-overview',{table:true});
   assert.match(await page.getByRole('region',{name:'Daily fuel sales'}).evaluate(element => getComputedStyle(element).backgroundImage), /rgb\(12, 34, 60\)/);
-  await page.locator('#submitted-shifts > summary').click();
   const submitted = page.getByRole('region',{name:'Submitted shifts'});
   assert.ok(await submitted.evaluate(region => region.scrollWidth <= region.clientWidth + 1));
   await submitted.getByRole('button',{name:'Open shift 1 report'}).waitFor();
   for (const name of ['Daily report','Ledger','Receivables','Payroll','Payables','Automation','Operations','Banking','Exceptions','Settings','Contacts','Team']) {
     await page.setViewportSize({width:1440,height:1000});
-    const financeTab = {Receivables:'To collect', Payables:'To pay'}[name];
+    const financeTab = {Receivables:'To collect', Payables:'To pay', Payroll:'To pay', Banking:'Banking'}[name];
     await page.getByRole('button',{name:financeTab ? 'Ledger' : name,exact:true}).click();
     if (financeTab) {
       await page.getByRole('tab',{name:financeTab,exact:true}).click();
       await page.getByRole('tab',{name:financeTab,exact:true,selected:true}).waitFor();
+      if (name === 'Payroll') await page.getByRole('tab',{name:'Salaries',exact:true}).click();
     }
     await page.locator('h1').filter({hasText:financeTab ? 'Ledger' : name === 'Settings' ? 'Station settings' : name === 'Exceptions' ? 'Exception inbox' : name}).waitFor();
 
@@ -167,7 +167,7 @@ test('typography stays consistent across roles, reports, phone layouts and offli
     }
   }
   await page.getByRole('button',{name:'Overview',exact:true}).click();
-  await page.getByRole('button',{name:/1 shift awaiting review/}).click();
+  await page.getByRole('button',{name:'Open shift 1 report'}).click();
   await page.getByRole('heading',{name:'Shift #1',exact:true}).waitFor();
   await audit('owner-shift-report');
   await page.getByRole('button',{name:'Correct report figures'}).click();

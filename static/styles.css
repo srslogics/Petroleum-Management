@@ -225,7 +225,13 @@ form > label + label, .password-entry { margin-top: .9rem; }
 .fuel-performance span:not(.fuel-name), .fuel-performance small { display: block; color: var(--on-dark-muted); margin-top: .15rem; }
 .sales-foot { padding: .7rem 1.5rem; color: var(--on-dark-muted); background: var(--navy-mid); }
 .attention-surface { padding: 1.4rem; background: var(--paper); border: 1px solid var(--line); border-radius: .85rem; min-width: 0; }
+.review-number { display: flex; align-items: baseline; gap: .65rem; margin: .8rem 0 .6rem; }
+.review-number span { color: var(--muted); }
 .attention-surface > p { color: var(--muted); }
+.review-breakdown { margin: 1.1rem 0 0; }
+.review-breakdown > div { display: flex; justify-content: space-between; gap: .5rem; padding: .45rem 0; border-top: 1px solid var(--line); }
+.review-breakdown dt { color: var(--muted); }
+.review-breakdown dd { margin: 0; }
 .inventory-surface { grid-column: 1 / -1; background: var(--paper); border: 1px solid var(--line); border-radius: .8rem; padding: 1.2rem 1.4rem; }
 .inventory-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.75rem; }
 .inventory-grid .stock-detail { border: 0; padding: .2rem 0; }
@@ -316,6 +322,7 @@ input, select, textarea { scroll-margin-block: 1rem; }
   .login { margin-block: 2.2rem; padding: 1.25rem; }
   .sales-amount { overflow-wrap: anywhere; }
   .key-values dd { min-width: 0; }
+  .review-number { flex-wrap: wrap; }
   .workspace-header, .entry-header { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 }
 @media print {

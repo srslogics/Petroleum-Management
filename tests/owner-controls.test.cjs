@@ -72,7 +72,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   assert.equal(await setup.count(),0);
 
   await openCollections();
-  await page.getByRole('button',{name:'+ Record credit',exact:true}).click();
+  await page.getByRole('button',{name:'+ Record fuel credit',exact:true}).click();
   const credit = page.getByRole('dialog',{name:'Record customer credit'});
   await credit.getByLabel('Customer / account name').fill('Test Credit');
   await credit.getByLabel('Credit amount (₹)',{exact:true}).fill('50');
@@ -182,7 +182,7 @@ test('owner controls work through desktop and mobile screens', async t => {
 
   // A correction request is answered by the manager, applied by the owner, and audited.
   await page.getByRole('button',{name:'Overview',exact:true}).click();
-  await page.getByRole('button',{name:/1 shift awaiting review/}).click();
+  await page.getByRole('button',{name:'Review next shift'}).click();
   await page.getByRole('heading',{name:'Shift #1',exact:true}).waitFor();
   await page.locator('#request-correction').getByLabel('Ask the manager to clarify or correct').fill('Confirm counted cash');
   await page.getByRole('button',{name:'Send correction request'}).click();
@@ -239,7 +239,8 @@ test('owner controls work through desktop and mobile screens', async t => {
   await payment.getByText('This reference has already been recorded. Refresh before trying again.',{exact:true}).waitFor();
   assert.equal(await payment.getByLabel('Amount received (₹)').inputValue(),'100');
   await payment.getByRole('button',{name:'Close dialog',exact:true}).click();
-  await page.getByRole('button',{name:'Banking',exact:true}).click();
+  await page.getByRole('button',{name:'Ledger',exact:true}).click();
+  await page.getByRole('tab',{name:'Banking',exact:true}).click();
   const card = page.getByRole('row').filter({has:page.getByText('Card',{exact:true})});
   await card.getByRole('button',{name:'Record settlement',exact:true}).click();
   const receipt = page.getByRole('dialog');
@@ -312,7 +313,7 @@ test('owner controls work through desktop and mobile screens', async t => {
   await page.keyboard.press('Escape');
   assert.equal(await more.getAttribute('aria-expanded'), 'false');
   assert.equal(await more.evaluate(element => element === document.activeElement), true);
-  for (const nav of ['Overview','Ledger','Payroll','Operations','Banking','Exceptions','Automation','Settings','Contacts','Team','Account security']) {
+  for (const nav of ['Overview','Ledger','Operations','Exceptions','Automation','Settings','Contacts','Team','Account security']) {
     if (!['Overview','Ledger'].includes(nav)) await more.click();
     await page.getByRole('button',{name:nav,exact:true}).click();
     await page.locator('.app-nav button[aria-current=page]', {hasText:nav}).waitFor({state:'attached'});
